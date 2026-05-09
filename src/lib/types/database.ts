@@ -115,7 +115,15 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['sessions']['Insert']>
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: 'sessions_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
       }
       attempts: {
         Row: {
@@ -139,7 +147,29 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['attempts']['Insert']>
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: 'attempts_question_id_fkey'
+            columns: ['question_id']
+            isOneToOne: false
+            referencedRelation: 'questions'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'attempts_session_id_fkey'
+            columns: ['session_id']
+            isOneToOne: false
+            referencedRelation: 'sessions'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'attempts_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
       }
       bookmarks: {
         Row: {
@@ -155,7 +185,22 @@ export interface Database {
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['bookmarks']['Insert']>
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: 'bookmarks_question_id_fkey'
+            columns: ['question_id']
+            isOneToOne: false
+            referencedRelation: 'questions'
+            referencedColumns: ['id']
+          },
+          {
+            foreignKeyName: 'bookmarks_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
       }
     }
     Views: {
