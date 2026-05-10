@@ -1,22 +1,20 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { useQuizStore } from '@/lib/stores/quiz-store';
 import { PillToggle } from '@/components/ui/PillToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
 import { SECTIONS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
 import { formatTopic } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
+import { useStartQuiz } from '@/lib/quiz/use-start-quiz';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 
 export default function QuizSetupPage() {
-  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const startQuiz = useQuizStore((state) => state.startQuiz);
+  const { start, loading, error } = useStartQuiz();
 
   const [section, setSection] = useState<'all' | 'basic_sciences' | 'clinical_sciences'>('all');
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
@@ -27,16 +25,11 @@ export default function QuizSetupPage() {
   const [timerEnabled, setTimerEnabled] = useState<boolean>(true);
   
   const [matchingCount, setMatchingCount] = useState<number>(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Fetch topics dynamically
   useEffect(() => {
     async function fetchTopics() {
-      let query = supabase.from('questions').select('topic');
-      if (section !== 'all') {
-        query = query.eq('section', section);
-      }
+      const query = supabase.from('questions').select('topic');
       const { data } = await query;
       if (data) {
         const unique = Array.from(
@@ -86,7 +79,6 @@ export default function QuizSetupPage() {
   useEffect(() => {
     async function fetchCount() {
       let query = supabase.from('questions').select('*', { count: 'exact', head: true });
-      if (section !== 'all') query = query.eq('section', section);
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
       // In a real app we might join to attempts to check "exclude incomplete" 
@@ -99,69 +91,13 @@ export default function QuizSetupPage() {
 
   const handleStart = async () => {
     if (matchingCount === 0) return;
-    setLoading(true);
-    setError(null);
-
-    const { data: userData } = await supabase.auth.getUser();
-    if (!userData?.user) {
-      setLoading(false);
-      router.push('/login');
-      return;
-    }
-
-    // 1. Fetch randomized questions before creating a session.
-    let query = supabase.from('questions').select('id');
-    if (section !== 'all') query = query.eq('section', section);
-    if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
-    if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
-
-    const { data: qs, error: questionsError } = await query;
-    if (questionsError) {
-      console.error(questionsError);
-      setError('Could not load questions for this quiz. Please try again.');
-      setLoading(false);
-      return;
-    }
-
-    if (!qs || qs.length === 0) {
-      setError('No questions matched those filters.');
-      setLoading(false);
-      return;
-    }
-
-    const shuffled = [...qs].sort(() => 0.5 - Math.random());
-    const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-    const qIds = selectedQs.map((q) => q.id);
-
-    if (qIds.length === 0) {
-      setError('No questions matched those filters.');
-      setLoading(false);
-      return;
-    }
-
-    // 2. Create session after questions have been selected.
-    const { data: sessionData, error: sessionError } = await supabase
-      .from('sessions')
-      .insert({
-        user_id: userData.user.id,
-        timer_enabled: timerEnabled,
-        section_filter: section === 'all' ? null : section,
-      })
-      .select('id')
-      .single();
-
-    if (sessionError || !sessionData) {
-      console.error(sessionError);
-      setError('Could not create a quiz session. Please try again.');
-      setLoading(false);
-      return;
-    }
-
-    const sessionId = sessionData.id;
-
-    // 3. Set store atomically, then navigate.
-    startQuiz({ sessionId, timerEnabled, sectionFilter: section === 'all' ? null : section }, qIds);
-    router.push(`/quiz/${sessionId}`);
+    await start({
+      section,
+      selectedTopics,
+      selectedSubtopics,
+      questionCount,
+      timerEnabled,
+    });
   };
 
   return (

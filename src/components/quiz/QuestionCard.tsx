@@ -4,7 +4,7 @@ import { BookmarkIcon as BookmarkOutline } from '@heroicons/react/24/outline';
 import { createClient } from '@/lib/supabase/client';
 
 interface QuestionCardProps {
-  questionId: string;
+  questionId: number;
   questionNumber: number;
   totalQuestions: number;
   stem: string;

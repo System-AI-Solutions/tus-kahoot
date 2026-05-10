@@ -17,9 +17,9 @@ export default async function ReviewPage() {
       id,
       user_answer,
       questions (
-        id,
+        question,
         topic,
-        stem,
+        question_text,
         correct_answer,
         option_a,
         option_b,
@@ -38,7 +38,7 @@ export default async function ReviewPage() {
       const q = a.questions;
       if (!grouped[q.topic]) grouped[q.topic] = [];
       // Prevent duplicates if answered wrong multiple times
-      if (!grouped[q.topic].find((ext) => ext.questions.id === q.id)) {
+      if (!grouped[q.topic].find((ext) => ext.questions.question === q.question)) {
         grouped[q.topic].push(a);
       }
     });
@@ -76,7 +76,7 @@ export default async function ReviewPage() {
 
                     return (
                       <div key={a.id} className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-md">
-                        <p className="mb-6 font-medium text-white">{q.stem}</p>
+                        <p className="mb-6 font-medium text-white">{q.question_text}</p>
                         
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                           {options.map((opt) => {

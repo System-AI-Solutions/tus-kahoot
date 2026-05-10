@@ -11,7 +11,7 @@ import { TIMER_DURATION_MS } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 
 interface QuestionData {
-  id: string;
+  id: number;
   stem: string;
   option_a: string;
   option_b: string;

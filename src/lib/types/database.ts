@@ -11,7 +11,9 @@ export interface Database {
     Tables: {
       questions: {
         Row: {
-          id: string
+          question: number
+          question_text: string
+          id?: string
           section: 'basic_sciences' | 'clinical_sciences'
           topic: string
           subtopic:
@@ -51,6 +53,8 @@ export interface Database {
           created_at: string
         }
         Insert: {
+          question: number
+          question_text: string
           id?: string
           section: 'basic_sciences' | 'clinical_sciences'
           topic: string
@@ -130,7 +134,7 @@ export interface Database {
           id: string
           user_id: string
           session_id: string
-          question_id: string
+          question_id: number
           user_answer: string | null
           is_correct: boolean
           time_taken_ms: number | null
@@ -140,7 +144,7 @@ export interface Database {
           id?: string
           user_id: string
           session_id: string
-          question_id: string
+          question_id: number
           user_answer?: string | null
           is_correct?: boolean
           time_taken_ms?: number | null
@@ -175,13 +179,13 @@ export interface Database {
         Row: {
           id: string
           user_id: string
-          question_id: string
+          question_id: number
           created_at: string
         }
         Insert: {
           id?: string
           user_id: string
-          question_id: string
+          question_id: number
           created_at?: string
         }
         Update: Partial<Database['public']['Tables']['bookmarks']['Insert']>

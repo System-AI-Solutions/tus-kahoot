@@ -15,9 +15,9 @@ export default async function BookmarksPage() {
     .select(`
       id,
       questions (
-        id,
+        question,
         topic,
-        stem,
+        question_text,
         correct_answer,
         option_a,
         option_b,
@@ -48,7 +48,7 @@ export default async function BookmarksPage() {
                       {formatTopic(q.topic)}
                     </span>
                     <p className="line-clamp-3 text-sm font-medium text-white mb-4">
-                      {q.stem}
+                      {q.question_text}
                     </p>
                   </div>
                   <div className="rounded bg-[var(--color-surface)] p-3">
