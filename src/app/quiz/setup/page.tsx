@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
@@ -9,10 +9,13 @@ import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
 import { SECTIONS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
 import { formatTopic } from '@/lib/utils';
+import type { Database } from '@/lib/types/database';
+
+type QuestionRow = Database['public']['Tables']['questions']['Row'];
 
 export default function QuizSetupPage() {
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const setConfig = useQuizStore((state) => state.setConfig);
   const setQuestionIds = useQuizStore((state) => state.setQuestionIds);
 
@@ -23,7 +26,6 @@ export default function QuizSetupPage() {
   const [selectedSubtopics, setSelectedSubtopics] = useState<SubtopicTag[]>([]);
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [timerEnabled, setTimerEnabled] = useState<boolean>(true);
-  const [excludeIncomplete, setExcludeIncomplete] = useState<boolean>(true);
   
   const [matchingCount, setMatchingCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
@@ -40,11 +42,11 @@ export default function QuizSetupPage() {
         const unique = Array.from(
           new Set(
             data
-              .map((d: any) => d.topic)
+              .map((d: Pick<QuestionRow, 'topic'>) => d.topic)
               .filter((topic): topic is string => typeof topic === 'string' && topic.length > 0)
           )
         );
-        setAvailableTopics(unique as string[]);
+        setAvailableTopics(unique);
         setSelectedTopics([]); // reset selection on section change
       }
     }
@@ -69,7 +71,7 @@ export default function QuizSetupPage() {
         const unique = Array.from(
           new Set(
             data
-              .map((d: any) => d.subtopic)
+              .map((d: Pick<QuestionRow, 'subtopic'>) => d.subtopic)
               .filter(isSubtopicTag)
           )
         );
@@ -100,7 +102,11 @@ export default function QuizSetupPage() {
     setLoading(true);
 
     const { data: userData } = await supabase.auth.getUser();
-    if (!userData?.user) return;
+    if (!userData?.user) {
+      setLoading(false);
+      router.push('/login');
+      return;
+    }
 
     // 1. Create session
     const { data: sessionData, error: sessionError } = await supabase
@@ -159,7 +165,7 @@ export default function QuizSetupPage() {
           <div className="space-y-2">
             <label className="text-sm font-semibold text-white">Section</label>
             <PillToggle
-              options={SECTIONS as any}
+              options={SECTIONS}
               selected={section}
               onChange={(v) => setSection(v as typeof section)}
             />

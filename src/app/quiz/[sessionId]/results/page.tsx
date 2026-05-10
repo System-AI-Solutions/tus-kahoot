@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { use, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
@@ -8,7 +8,8 @@ import { Header } from '@/components/Header';
 import { AccuracyRing } from '@/components/ui/AccuracyRing';
 import Link from 'next/link';
 
-export default function ResultsPage({ params }: { params: { sessionId: string } }) {
+export default function ResultsPage({ params }: { params: Promise<{ sessionId: string }> }) {
+  const { sessionId } = use(params);
   const router = useRouter();
   const store = useQuizStore();
   const hasSaved = useRef(false);
@@ -20,7 +21,7 @@ export default function ResultsPage({ params }: { params: { sessionId: string } 
 
   useEffect(() => {
     // Basic verification
-    if (!store.config || store.config.sessionId !== params.sessionId || store.answers.length === 0) {
+    if (!store.config || store.config.sessionId !== sessionId || store.answers.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -36,7 +37,7 @@ export default function ResultsPage({ params }: { params: { sessionId: string } 
       // 1. Save all attempts
       const attemptsToInsert = store.answers.map((a) => ({
         user_id: user.id,
-        session_id: params.sessionId,
+        session_id: sessionId,
         question_id: a.questionId,
         user_answer: a.userAnswer,
         is_correct: a.isCorrect,
@@ -53,13 +54,13 @@ export default function ResultsPage({ params }: { params: { sessionId: string } 
           max_streak: store.maxStreak,
           completed_at: new Date().toISOString(),
         })
-        .eq('id', params.sessionId);
+        .eq('id', sessionId);
 
       setLoading(false);
     }
 
     saveResults();
-  }, [params.sessionId, store, router]);
+  }, [sessionId, store, router]);
 
   if (loading) {
     return (

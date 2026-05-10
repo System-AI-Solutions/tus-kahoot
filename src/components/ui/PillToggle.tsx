@@ -2,7 +2,7 @@ import React from 'react';
 import { cn } from '@/lib/utils';
 
 export interface PillToggleProps<T extends string | number | boolean> {
-  options: { id: T; label: string }[];
+  options: readonly { id: T; label: string }[];
   selected: T;
   onChange: (id: T) => void;
   className?: string;

@@ -1,20 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { QuizPlayer } from '@/components/quiz/QuizPlayer';
+import type { Database } from '@/lib/types/database';
 
-export default function QuizPage({ params }: { params: { sessionId: string } }) {
+type QuestionRow = Database['public']['Tables']['questions']['Row'];
+
+export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
+  const { sessionId } = use(params);
   const router = useRouter();
   const store = useQuizStore();
-  const [questions, setQuestions] = useState<any[]>([]);
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     // Basic verification: user must have config and sessionId match
-    if (!store.config || store.config.sessionId !== params.sessionId || store.questionIds.length === 0) {
+    if (!store.config || store.config.sessionId !== sessionId || store.questionIds.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -33,13 +37,15 @@ export default function QuizPage({ params }: { params: { sessionId: string } }) 
       }
 
       // Preserve the sorted order from setup
-      const ordered = store.questionIds.map((id) => data.find((q) => q.id === id)).filter(Boolean);
+      const ordered = store.questionIds
+        .map((id) => data.find((q) => q.id === id))
+        .filter((question): question is QuestionRow => Boolean(question));
       setQuestions(ordered);
       setLoading(false);
     }
 
     fetchQuestions();
-  }, [params.sessionId, store.config, store.questionIds, router]);
+  }, [sessionId, store.config, store.questionIds, router]);
 
   if (loading) {
     return (
