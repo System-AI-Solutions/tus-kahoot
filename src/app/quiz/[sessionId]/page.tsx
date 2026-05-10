@@ -12,13 +12,17 @@ type QuestionRow = Database['public']['Tables']['questions']['Row'];
 export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
-  const store = useQuizStore();
+  const hasHydrated = useQuizStore((state) => state.hasHydrated);
+  const config = useQuizStore((state) => state.config);
+  const questionIds = useQuizStore((state) => state.questionIds);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!hasHydrated) return;
+
     // Basic verification: user must have config and sessionId match
-    if (!store.config || store.config.sessionId !== sessionId || store.questionIds.length === 0) {
+    if (!config || config.sessionId !== sessionId || questionIds.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -28,7 +32,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       const { data, error } = await supabase
         .from('questions')
         .select('*')
-        .in('id', store.questionIds);
+        .in('id', questionIds);
 
       if (error || !data) {
         console.error(error);
@@ -37,7 +41,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       }
 
       // Preserve the sorted order from setup
-      const ordered = store.questionIds
+      const ordered = questionIds
         .map((id) => data.find((q) => q.id === id))
         .filter((question): question is QuestionRow => Boolean(question));
       setQuestions(ordered);
@@ -45,7 +49,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
     }
 
     fetchQuestions();
-  }, [sessionId, store.config, store.questionIds, router]);
+  }, [hasHydrated, sessionId, config, questionIds, router]);
 
   if (loading) {
     return (

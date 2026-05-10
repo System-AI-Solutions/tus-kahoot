@@ -11,17 +11,23 @@ import Link from 'next/link';
 export default function ResultsPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
-  const store = useQuizStore();
+  const hasHydrated = useQuizStore((state) => state.hasHydrated);
+  const config = useQuizStore((state) => state.config);
+  const answers = useQuizStore((state) => state.answers);
+  const score = useQuizStore((state) => state.score);
+  const maxStreak = useQuizStore((state) => state.maxStreak);
   const hasSaved = useRef(false);
   const [loading, setLoading] = useState(true);
 
-  const totalQuestions = store.answers.length;
-  const correctCount = store.answers.filter((a) => a.isCorrect).length;
+  const totalQuestions = answers.length;
+  const correctCount = answers.filter((a) => a.isCorrect).length;
   const accuracy = totalQuestions > 0 ? (correctCount / totalQuestions) * 100 : 0;
 
   useEffect(() => {
+    if (!hasHydrated) return;
+
     // Basic verification
-    if (!store.config || store.config.sessionId !== sessionId || store.answers.length === 0) {
+    if (!config || config.sessionId !== sessionId || answers.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -35,7 +41,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
       if (!user) return;
 
       // 1. Save all attempts
-      const attemptsToInsert = store.answers.map((a) => ({
+      const attemptsToInsert = answers.map((a) => ({
         user_id: user.id,
         session_id: sessionId,
         question_id: a.questionId,
@@ -50,8 +56,8 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
       await supabase
         .from('sessions')
         .update({
-          score: store.score,
-          max_streak: store.maxStreak,
+          score,
+          max_streak: maxStreak,
           completed_at: new Date().toISOString(),
         })
         .eq('id', sessionId);
@@ -60,7 +66,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
     }
 
     saveResults();
-  }, [sessionId, store, router]);
+  }, [hasHydrated, sessionId, config, answers, score, maxStreak, router]);
 
   if (loading) {
     return (
@@ -83,7 +89,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
           <div className="mt-8 flex flex-col items-center justify-center gap-8 md:flex-row md:gap-16">
             <div className="flex flex-col items-center">
               <span className="text-sm font-medium text-[var(--color-muted)]">Final Score</span>
-              <span className="mt-2 text-5xl font-black text-white">{store.score}</span>
+              <span className="mt-2 text-5xl font-black text-white">{score}</span>
             </div>
             
             <div className="flex flex-col items-center">
@@ -93,7 +99,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
 
             <div className="flex flex-col items-center">
               <span className="text-sm font-medium text-[var(--color-muted)]">Max Streak</span>
-              <span className="mt-2 text-4xl font-bold text-orange-500">🔥 {store.maxStreak}</span>
+              <span className="mt-2 text-4xl font-bold text-orange-500">🔥 {maxStreak}</span>
             </div>
           </div>
 
@@ -131,7 +137,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
                 </tr>
               </thead>
               <tbody>
-                {store.answers.map((a, i) => (
+                {answers.map((a, i) => (
                   <tr key={i} className="border-b border-[#222]">
                     <td className="px-4 py-3 text-white">Q{i + 1}</td>
                     <td className="px-4 py-3">

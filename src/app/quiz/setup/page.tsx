@@ -16,8 +16,7 @@ type QuestionRow = Database['public']['Tables']['questions']['Row'];
 export default function QuizSetupPage() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const setConfig = useQuizStore((state) => state.setConfig);
-  const setQuestionIds = useQuizStore((state) => state.setQuestionIds);
+  const startQuiz = useQuizStore((state) => state.startQuiz);
 
   const [section, setSection] = useState<'all' | 'basic_sciences' | 'clinical_sciences'>('all');
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
@@ -29,6 +28,7 @@ export default function QuizSetupPage() {
   
   const [matchingCount, setMatchingCount] = useState<number>(0);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Fetch topics dynamically
   useEffect(() => {
@@ -100,6 +100,7 @@ export default function QuizSetupPage() {
   const handleStart = async () => {
     if (matchingCount === 0) return;
     setLoading(true);
+    setError(null);
 
     const { data: userData } = await supabase.auth.getUser();
     if (!userData?.user) {
@@ -108,7 +109,37 @@ export default function QuizSetupPage() {
       return;
     }
 
-    // 1. Create session
+    // 1. Fetch randomized questions before creating a session.
+    let query = supabase.from('questions').select('id');
+    if (section !== 'all') query = query.eq('section', section);
+    if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
+    if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
+
+    const { data: qs, error: questionsError } = await query;
+    if (questionsError) {
+      console.error(questionsError);
+      setError('Could not load questions for this quiz. Please try again.');
+      setLoading(false);
+      return;
+    }
+
+    if (!qs || qs.length === 0) {
+      setError('No questions matched those filters.');
+      setLoading(false);
+      return;
+    }
+
+    const shuffled = [...qs].sort(() => 0.5 - Math.random());
+    const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
+    const qIds = selectedQs.map((q) => q.id);
+
+    if (qIds.length === 0) {
+      setError('No questions matched those filters.');
+      setLoading(false);
+      return;
+    }
+
+    // 2. Create session after questions have been selected.
     const { data: sessionData, error: sessionError } = await supabase
       .from('sessions')
       .insert({
@@ -121,34 +152,16 @@ export default function QuizSetupPage() {
 
     if (sessionError || !sessionData) {
       console.error(sessionError);
+      setError('Could not create a quiz session. Please try again.');
       setLoading(false);
       return;
     }
 
     const sessionId = sessionData.id;
 
-    // 2. Fetch randomized questions
-    let query = supabase.from('questions').select('id');
-    if (section !== 'all') query = query.eq('section', section);
-    if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
-    if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
-
-    const { data: qs } = await query;
-    if (qs && qs.length > 0) {
-      // Shuffle & limit
-      const shuffled = [...qs].sort(() => 0.5 - Math.random());
-      const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-      const qIds = selectedQs.map((q) => q.id);
-
-      // 3. Set Store
-      setConfig({ sessionId, timerEnabled, sectionFilter: section === 'all' ? null : section });
-      setQuestionIds(qIds);
-
-      // 4. Navigate
-      router.push(`/quiz/${sessionId}`);
-    } else {
-      setLoading(false);
-    }
+    // 3. Set store atomically, then navigate.
+    startQuiz({ sessionId, timerEnabled, sectionFilter: section === 'all' ? null : section }, qIds);
+    router.push(`/quiz/${sessionId}`);
   };
 
   return (
@@ -249,6 +262,11 @@ export default function QuizSetupPage() {
             {loading ? 'Starting...' : 'Start Quiz'}
           </button>
         </div>
+        {error && (
+          <div className="rounded-[var(--radius-card)] bg-red-950/50 p-4 text-sm font-medium text-red-200">
+            {error}
+          </div>
+        )}
       </main>
     </div>
   );

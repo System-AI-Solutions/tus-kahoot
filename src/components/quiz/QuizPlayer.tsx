@@ -21,6 +21,11 @@ interface QuestionData {
   correct_answer: string;
 }
 
+interface AnswerOption {
+  letter: 'A' | 'B' | 'C' | 'D' | 'E';
+  text: string;
+}
+
 export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   const router = useRouter();
   const store = useQuizStore();
@@ -38,7 +43,7 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Map options
   const options = React.useMemo(() => {
     if (!activeQuestion) return [];
-    const opts: any[] = [
+    const opts: AnswerOption[] = [
       { letter: 'A', text: activeQuestion.option_a },
       { letter: 'B', text: activeQuestion.option_b },
       { letter: 'C', text: activeQuestion.option_c },
@@ -53,6 +58,7 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Handle Answer
   const handleAnswer = useCallback((letter: string | null, isTimeout: boolean = false) => {
     if (status !== 'default') return; // Prevent double firing
+    if (!activeQuestion) return;
     
     setSelectedLetter(letter);
     setStatus('selected');
@@ -87,17 +93,22 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Timer Effect
   useEffect(() => {
     if (status !== 'default' || !store.config?.timerEnabled) return;
-    
-    if (timeRemainingMs <= 0) {
-      handleAnswer(null, true);
-      return;
-    }
 
     const interval = setInterval(() => {
       setTimeRemainingMs((prev) => Math.max(0, prev - 100)); // decrease smoothly
     }, 100);
 
     return () => clearInterval(interval);
+  }, [status, store.config?.timerEnabled]);
+
+  useEffect(() => {
+    if (status !== 'default' || !store.config?.timerEnabled || timeRemainingMs > 0) return;
+
+    const timeout = window.setTimeout(() => {
+      handleAnswer(null, true);
+    }, 0);
+
+    return () => window.clearTimeout(timeout);
   }, [timeRemainingMs, status, store.config?.timerEnabled, handleAnswer]);
 
   // Advance to next or results
@@ -110,7 +121,6 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
       setTimeRemainingMs(TIMER_DURATION_MS);
     } else {
       router.push(`/quiz/${store.config?.sessionId}/results`);
-      router.refresh();
     }
   }, [currentIndex, questions.length, router, store.config?.sessionId]);
 

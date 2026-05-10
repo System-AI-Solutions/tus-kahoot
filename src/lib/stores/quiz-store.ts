@@ -15,6 +15,7 @@ export interface AnswerRecord {
 }
 
 interface QuizState {
+  hasHydrated: boolean;
   config: QuizConfig | null;
   questionIds: string[];
   answers: AnswerRecord[];
@@ -22,8 +23,10 @@ interface QuizState {
   streak: number;
   maxStreak: number;
   
+  setHasHydrated: (hasHydrated: boolean) => void;
   setConfig: (config: QuizConfig) => void;
   setQuestionIds: (ids: string[]) => void;
+  startQuiz: (config: QuizConfig, questionIds: string[]) => void;
   addAnswer: (answer: AnswerRecord, pointsAdded: number) => void;
   resetQuizState: () => void;
 }
@@ -31,6 +34,7 @@ interface QuizState {
 export const useQuizStore = create<QuizState>()(
   persist(
     (set) => ({
+      hasHydrated: false,
       config: null,
       questionIds: [],
       answers: [],
@@ -38,8 +42,18 @@ export const useQuizStore = create<QuizState>()(
       streak: 0,
       maxStreak: 0,
 
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       setConfig: (config) => set({ config }),
       setQuestionIds: (questionIds) => set({ questionIds }),
+      startQuiz: (config, questionIds) =>
+        set({
+          config,
+          questionIds,
+          answers: [],
+          score: 0,
+          streak: 0,
+          maxStreak: 0,
+        }),
       addAnswer: (answer, pointsAdded) =>
         set((state) => {
           const newStreak = answer.isCorrect ? state.streak + 1 : 0;
@@ -63,6 +77,20 @@ export const useQuizStore = create<QuizState>()(
     {
       name: 'medbank-quiz-storage',
       storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        config: state.config,
+        questionIds: state.questionIds,
+        answers: state.answers,
+        score: state.score,
+        streak: state.streak,
+        maxStreak: state.maxStreak,
+      }),
+      onRehydrateStorage: (state) => {
+        state.setHasHydrated(false);
+        return (state) => {
+          state?.setHasHydrated(true);
+        };
+      },
     }
   )
 );
