@@ -6,6 +6,30 @@ import { createClient } from '@/lib/supabase/server';
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 
+const BASIC_SCIENCE_SUBTOPICS = [
+  'anatomy',
+  'biochemistry',
+  'microbiology',
+  'pathology',
+  'pharmacology',
+] as const;
+
+const CLINICAL_SCIENCE_SUBTOPICS = [
+  'internal_medicine',
+  'surgery',
+  'pediatrics',
+  'obstetrics_gynecology',
+  'psychiatry',
+  'neurology',
+  'radiology',
+  'orthopedics',
+  'ophthalmology',
+  'ent',
+  'dermatology',
+  'cardiology',
+  'urology',
+] as const;
+
 export default async function DashboardPage() {
   // Check auth - assuming we want to protect this page
   const supabase = await createClient();
@@ -14,6 +38,22 @@ export default async function DashboardPage() {
   if (!user) {
     redirect('/login');
   }
+
+  const [
+    { count: allQuestions },
+    { count: basicSciences },
+    { count: clinicalSciences },
+  ] = await Promise.all([
+    supabase.from('questions').select('question', { count: 'exact', head: true }),
+    supabase
+      .from('questions')
+      .select('question', { count: 'exact', head: true })
+      .in('subtopic', BASIC_SCIENCE_SUBTOPICS),
+    supabase
+      .from('questions')
+      .select('question', { count: 'exact', head: true })
+      .in('subtopic', CLINICAL_SCIENCE_SUBTOPICS),
+  ]);
 
   return (
     <div className="flex h-screen flex-col bg-[var(--color-bg)] overflow-hidden">
@@ -37,7 +77,13 @@ export default async function DashboardPage() {
               </Link>
             </div>
 
-            <DashboardCards />
+            <DashboardCards
+              counts={{
+                basicSciences: basicSciences || 0,
+                clinicalSciences: clinicalSciences || 0,
+                allQuestions: allQuestions || 0,
+              }}
+            />
             <RecentImports />
           </div>
         </main>
