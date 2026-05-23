@@ -4,13 +4,13 @@ import { BookmarkIcon as BookmarkOutline } from '@heroicons/react/24/outline';
 import { createClient } from '@/lib/supabase/client';
 
 interface QuestionCardProps {
-  questionId: number;
+  joinKey: string;
   questionNumber: number;
   totalQuestions: number;
-  stem: string;
+  questionText: string;
 }
 
-export function QuestionCard({ questionId, questionNumber, totalQuestions, stem }: QuestionCardProps) {
+export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText }: QuestionCardProps) {
   const [bookmarked, setBookmarked] = React.useState(false);
   const supabase = React.useMemo(() => createClient(), []);
 
@@ -23,14 +23,14 @@ export function QuestionCard({ questionId, questionNumber, totalQuestions, stem 
         .from('bookmarks')
         .select('id')
         .eq('user_id', user.id)
-        .eq('question_id', questionId)
+        .eq('join_key', joinKey)
         .maybeSingle();
       
       if (data) setBookmarked(true);
       else setBookmarked(false);
     }
     checkBookmark();
-  }, [questionId, supabase]);
+  }, [joinKey, supabase]);
 
   const toggleBookmark = async () => {
     const { data: { user } } = await supabase.auth.getUser();
@@ -41,12 +41,12 @@ export function QuestionCard({ questionId, questionNumber, totalQuestions, stem 
         .from('bookmarks')
         .delete()
         .eq('user_id', user.id)
-        .eq('question_id', questionId);
+        .eq('join_key', joinKey);
       setBookmarked(false);
     } else {
       await supabase
         .from('bookmarks')
-        .insert({ user_id: user.id, question_id: questionId });
+        .insert({ user_id: user.id, join_key: joinKey });
       setBookmarked(true);
     }
   };
@@ -69,7 +69,7 @@ export function QuestionCard({ questionId, questionNumber, totalQuestions, stem 
         </button>
       </div>
       <h2 className="text-xl font-bold leading-relaxed text-black">
-        {stem}
+        {questionText}
       </h2>
     </div>
   );

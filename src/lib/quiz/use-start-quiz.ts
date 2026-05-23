@@ -52,7 +52,7 @@ export function useStartQuiz() {
         return { ok: false, error: 'Not signed in.' };
       }
 
-      let query = supabase.from('questions').select('question');
+      let query = supabase.from('questions').select('join_key');
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
 
@@ -68,9 +68,11 @@ export function useStartQuiz() {
       const shuffled = [...questions].sort(() => 0.5 - Math.random());
       const selectedQuestions =
         questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-      const questionIds = selectedQuestions.map((question) => question.question);
+      const questionJoinKeys = selectedQuestions
+        .map((question) => question.join_key)
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
 
-      if (questionIds.length === 0) {
+      if (questionJoinKeys.length === 0) {
         return fail('No questions matched those filters.');
       }
 
@@ -92,7 +94,7 @@ export function useStartQuiz() {
       const sessionId = sessionData.id;
       useQuizStore.setState({
         config: { sessionId, timerEnabled, sectionFilter },
-        questionIds,
+        questionJoinKeys,
         answers: [],
         score: 0,
         streak: 0,

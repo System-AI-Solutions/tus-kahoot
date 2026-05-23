@@ -11,14 +11,15 @@ import { TIMER_DURATION_MS } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 
 interface QuestionData {
-  id: number;
-  stem: string;
+  question: number;
+  join_key: string;
+  question_text: string;
   option_a: string;
   option_b: string;
   option_c: string;
   option_d: string;
   option_e: string | null;
-  correct_answer: string;
+  correct_answer: 'A' | 'B' | 'C' | 'D' | 'E';
 }
 
 interface AnswerOption {
@@ -58,7 +59,6 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Handle Answer
   const handleAnswer = useCallback((letter: string | null, isTimeout: boolean = false) => {
     if (status !== 'default') return; // Prevent double firing
-    if (!activeQuestion) return;
     
     setSelectedLetter(letter);
     setStatus('selected');
@@ -81,7 +81,7 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
       }
 
       store.addAnswer({
-        questionId: activeQuestion.id,
+        joinKey: activeQuestion.join_key,
         userAnswer: letter,
         isCorrect,
         timeTakenMs: TIMER_DURATION_MS - timeRemainingMs,
@@ -93,22 +93,17 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Timer Effect
   useEffect(() => {
     if (status !== 'default' || !store.config?.timerEnabled) return;
+    
+    if (timeRemainingMs <= 0) {
+      const timeout = window.setTimeout(() => handleAnswer(null, true), 0);
+      return () => window.clearTimeout(timeout);
+    }
 
     const interval = setInterval(() => {
       setTimeRemainingMs((prev) => Math.max(0, prev - 100)); // decrease smoothly
     }, 100);
 
     return () => clearInterval(interval);
-  }, [status, store.config?.timerEnabled]);
-
-  useEffect(() => {
-    if (status !== 'default' || !store.config?.timerEnabled || timeRemainingMs > 0) return;
-
-    const timeout = window.setTimeout(() => {
-      handleAnswer(null, true);
-    }, 0);
-
-    return () => window.clearTimeout(timeout);
   }, [timeRemainingMs, status, store.config?.timerEnabled, handleAnswer]);
 
   // Advance to next or results
@@ -121,8 +116,14 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
       setTimeRemainingMs(TIMER_DURATION_MS);
     } else {
       router.push(`/quiz/${store.config?.sessionId}/results`);
+      router.refresh();
     }
   }, [currentIndex, questions.length, router, store.config?.sessionId]);
+
+  const leaveExam = useCallback(() => {
+    store.resetQuizState();
+    router.push('/dashboard');
+  }, [router, store]);
 
   // Keyboard Shortcuts
   useEffect(() => {
@@ -167,6 +168,16 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
         timerEnabled={store.config?.timerEnabled || false}
         timeRemainingMs={Math.max(0, timeRemainingMs)}
       />
+
+      <div className="flex justify-center bg-[var(--color-bg)] px-4 py-4">
+        <button
+          type="button"
+          onClick={leaveExam}
+          className="rounded-[var(--radius-button)] border border-red-500/50 bg-red-500/10 px-5 py-2 text-sm font-bold text-red-200 transition-colors hover:border-red-400 hover:bg-red-500/20 hover:text-white"
+        >
+          Leave Exam
+        </button>
+      </div>
       
       <FeedbackBanner 
         status={feedbackStatus} 
@@ -176,10 +187,10 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
 
       <main className="flex flex-1 flex-col justify-center px-4 py-8">
         <QuestionCard 
-          questionId={activeQuestion.id}
+          joinKey={activeQuestion.join_key}
           questionNumber={currentIndex + 1}
           totalQuestions={questions.length}
-          stem={activeQuestion.stem}
+          questionText={activeQuestion.question_text}
         />
         
         <div className="mx-auto mt-12 w-full max-w-4xl px-4">

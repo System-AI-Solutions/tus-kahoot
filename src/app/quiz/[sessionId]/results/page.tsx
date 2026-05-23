@@ -44,7 +44,7 @@ export default function ResultsPage({ params }: { params: Promise<{ sessionId: s
       const attemptsToInsert = answers.map((a) => ({
         user_id: user.id,
         session_id: sessionId,
-        question_id: a.questionId,
+        join_key: a.joinKey,
         user_answer: a.userAnswer,
         is_correct: a.isCorrect,
         time_taken_ms: a.timeTakenMs,

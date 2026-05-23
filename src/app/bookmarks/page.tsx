@@ -1,7 +1,19 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
 import { formatTopic } from '@/lib/utils';
+import type { Database } from '@/lib/types/database';
 import Link from 'next/link';
+
+type QuestionRow = Database['public']['Tables']['questions']['Row'];
+type BookmarkQuestion = Pick<
+  QuestionRow,
+  'join_key' | 'topic' | 'question_text' | 'correct_answer' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e'
+>;
+type BookmarkRow = {
+  id: string;
+  questions: BookmarkQuestion | null;
+};
+type AnswerOptionKey = 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e';
 
 export default async function BookmarksPage() {
   const supabase = await createClient();
@@ -9,13 +21,12 @@ export default async function BookmarksPage() {
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return null;
 
-  // @ts-ignore
-  const { data: bookmarks } = await supabase
+  const { data } = await supabase
     .from('bookmarks')
     .select(`
       id,
       questions (
-        question,
+        join_key,
         topic,
         question_text,
         correct_answer,
@@ -27,6 +38,7 @@ export default async function BookmarksPage() {
       )
     `)
     .order('created_at', { ascending: false });
+  const bookmarks = data as unknown as BookmarkRow[] | null;
 
   return (
     <div className="min-h-screen pb-12">
@@ -34,13 +46,20 @@ export default async function BookmarksPage() {
       <main className="mx-auto max-w-7xl space-y-8 p-6">
         <div className="flex items-center justify-between">
           <h1 className="text-3xl font-bold text-white">Your Bookmarks</h1>
+          <Link
+            href="/dashboard"
+            className="rounded-[var(--radius-button)] bg-white px-5 py-2 text-sm font-bold text-black transition-colors hover:bg-white/85"
+          >
+            Return
+          </Link>
         </div>
 
         {bookmarks && bookmarks.length > 0 ? (
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {bookmarks.map((b: any) => {
+            {bookmarks.map((b) => {
               const q = b.questions;
-              const ansKey = `option_${q.correct_answer.toLowerCase()}`;
+              if (!q) return null;
+              const answerKey = `option_${q.correct_answer.toLowerCase()}` as AnswerOptionKey;
               return (
                 <div key={b.id} className="flex flex-col justify-between rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-lg">
                   <div>
@@ -54,7 +73,7 @@ export default async function BookmarksPage() {
                   <div className="rounded bg-[var(--color-surface)] p-3">
                     <div className="text-xs font-bold text-[var(--color-muted)]">Correct Answer</div>
                     <div className="text-sm font-bold text-[var(--color-correct-banner)]">
-                      {q.correct_answer}: {q[ansKey]}
+                      {q.correct_answer}: {q[answerKey]}
                     </div>
                   </div>
                 </div>

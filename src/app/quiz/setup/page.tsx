@@ -1,36 +1,55 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { useQuizStore } from '@/lib/stores/quiz-store';
 import { PillToggle } from '@/components/ui/PillToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
-import { SECTIONS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
+import { isSubtopicTag, type SubtopicTag } from '@/lib/constants';
 import { formatTopic } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
-import { useStartQuiz } from '@/lib/quiz/use-start-quiz';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 
-export default function QuizSetupPage() {
-  const supabase = useMemo(() => createClient(), []);
-  const { start, loading, error } = useStartQuiz();
+type SupabaseErrorLike = {
+  message?: string;
+  details?: string;
+  hint?: string;
+  code?: string;
+};
 
-  const [section, setSection] = useState<'all' | 'basic_sciences' | 'clinical_sciences'>('all');
+function formatSupabaseError(error: SupabaseErrorLike) {
+  return error.message || error.details || error.hint || error.code || 'Unknown Supabase error';
+}
+
+export default function QuizSetupPage() {
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const setConfig = useQuizStore((state) => state.setConfig);
+  const setQuestionJoinKeys = useQuizStore((state) => state.setQuestionJoinKeys);
+
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [availableSubtopics, setAvailableSubtopics] = useState<SubtopicTag[]>([]);
   const [selectedSubtopics, setSelectedSubtopics] = useState<SubtopicTag[]>([]);
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [timerEnabled, setTimerEnabled] = useState<boolean>(true);
+  const [excludeIncomplete, setExcludeIncomplete] = useState<boolean>(true);
   
   const [matchingCount, setMatchingCount] = useState<number>(0);
+  const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Fetch topics dynamically
   useEffect(() => {
     async function fetchTopics() {
-      const query = supabase.from('questions').select('topic');
-      const { data } = await query;
+      const { data, error } = await supabase.from('questions').select('topic');
+      if (error) {
+        setErrorMessage(`Could not load topics: ${error.message}`);
+        return;
+      }
       if (data) {
         const unique = Array.from(
           new Set(
@@ -38,13 +57,12 @@ export default function QuizSetupPage() {
               .map((d: Pick<QuestionRow, 'topic'>) => d.topic)
               .filter((topic): topic is string => typeof topic === 'string' && topic.length > 0)
           )
-        );
+        ).sort();
         setAvailableTopics(unique);
-        setSelectedTopics([]); // reset selection on section change
       }
     }
     fetchTopics();
-  }, [section, supabase]);
+  }, [supabase]);
 
   // Fetch subtopics dynamically based on topics
   useEffect(() => {
@@ -67,7 +85,7 @@ export default function QuizSetupPage() {
               .map((d: Pick<QuestionRow, 'subtopic'>) => d.subtopic)
               .filter(isSubtopicTag)
           )
-        );
+        ).sort();
         setAvailableSubtopics(unique);
         setSelectedSubtopics([]);
       }
@@ -78,26 +96,82 @@ export default function QuizSetupPage() {
   // Live matching count (debounced slightly by effect)
   useEffect(() => {
     async function fetchCount() {
-      let query = supabase.from('questions').select('*', { count: 'exact', head: true });
+      let query = supabase.from('questions').select('join_key', { count: 'exact', head: true });
+      if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
-      // In a real app we might join to attempts to check "exclude incomplete" 
-      // but without complex RPC, we can just do a basic count for UX
-      const { count } = await query;
+      const { count, error } = await query;
+      if (error) {
+        setErrorMessage(`Could not count matching questions: ${formatSupabaseError(error)}`);
+        setMatchingCount(0);
+        return;
+      }
+      setErrorMessage(null);
       setMatchingCount(count || 0);
     }
     fetchCount();
-  }, [section, selectedTopics, selectedSubtopics, supabase]);
+  }, [excludeIncomplete, selectedTopics, selectedSubtopics, supabase]);
 
   const handleStart = async () => {
     if (matchingCount === 0) return;
-    await start({
-      section,
-      selectedTopics,
-      selectedSubtopics,
-      questionCount,
-      timerEnabled,
-    });
+    setErrorMessage(null);
+    setLoading(true);
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user) {
+      setErrorMessage(userError?.message || 'You must be logged in to start a quiz.');
+      setLoading(false);
+      return;
+    }
+
+    // 1. Create session
+    const { data: sessionData, error: sessionError } = await supabase
+      .from('sessions')
+      .insert({
+        user_id: userData.user.id,
+        timer_enabled: timerEnabled,
+        section_filter: null,
+      })
+      .select('id')
+      .single();
+
+    if (sessionError || !sessionData) {
+      console.error(sessionError);
+      setLoading(false);
+      return;
+    }
+
+    const sessionId = sessionData.id;
+
+    // 2. Fetch randomized questions
+    let query = supabase.from('questions').select('join_key');
+    if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
+    if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
+    if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
+
+    const { data: qs, error: questionsError } = await query;
+    if (questionsError) {
+      setErrorMessage(`Could not load questions: ${formatSupabaseError(questionsError)}`);
+      setLoading(false);
+      return;
+    }
+
+    if (qs && qs.length > 0) {
+      // Shuffle & limit
+      const shuffled = [...qs].sort(() => 0.5 - Math.random());
+      const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
+      const questionJoinKeys = selectedQs.map((q) => q.join_key);
+
+      // 3. Set Store
+      setConfig({ sessionId, timerEnabled, sectionFilter: null });
+      setQuestionJoinKeys(questionJoinKeys);
+
+      // 4. Navigate
+      router.push(`/quiz/${sessionId}`);
+    } else {
+      setErrorMessage('No questions matched the selected filters.');
+      setLoading(false);
+    }
   };
 
   return (
@@ -110,16 +184,6 @@ export default function QuizSetupPage() {
         </div>
 
         <div className="space-y-6 rounded-[var(--radius-card)] bg-[var(--color-card)] p-6">
-          {/* Section Filter */}
-          <div className="space-y-2">
-            <label className="text-sm font-semibold text-white">Section</label>
-            <PillToggle
-              options={SECTIONS}
-              selected={section}
-              onChange={(v) => setSection(v as typeof section)}
-            />
-          </div>
-
           {/* Topic Filter */}
           <div className="space-y-2">
             <label className="text-sm font-semibold text-white">Topics</label>
@@ -183,8 +247,25 @@ export default function QuizSetupPage() {
                 onChange={(v) => setTimerEnabled(v as boolean)}
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-white">Question Quality</label>
+              <PillToggle
+                options={[
+                  { id: true, label: 'Complete Only' },
+                  { id: false, label: 'Include Incomplete' },
+                ]}
+                selected={excludeIncomplete}
+                onChange={(v) => setExcludeIncomplete(v as boolean)}
+              />
+            </div>
           </div>
         </div>
+
+        {errorMessage && (
+          <div className="rounded-[var(--radius-card)] border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-200">
+            {errorMessage}
+          </div>
+        )}
 
         <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-[var(--color-surface)] p-6">
           <div className="text-lg">
@@ -198,11 +279,6 @@ export default function QuizSetupPage() {
             {loading ? 'Starting...' : 'Start Quiz'}
           </button>
         </div>
-        {error && (
-          <div className="rounded-[var(--radius-card)] bg-red-950/50 p-4 text-sm font-medium text-red-200">
-            {error}
-          </div>
-        )}
       </main>
     </div>
   );

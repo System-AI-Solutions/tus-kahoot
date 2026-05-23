@@ -8,43 +8,20 @@ import { QuizPlayer } from '@/components/quiz/QuizPlayer';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
-type QuizQuestion = Pick<
-  QuestionRow,
-  | 'question'
-  | 'question_text'
-  | 'option_a'
-  | 'option_b'
-  | 'option_c'
-  | 'option_d'
-  | 'option_e'
-  | 'correct_answer'
->;
 
 export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
+  const store = useQuizStore();
   const hasHydrated = useQuizStore((state) => state.hasHydrated);
-  const config = useQuizStore((state) => state.config);
-  const questionIds = useQuizStore((state) => state.questionIds);
-  const [questions, setQuestions] = useState<
-    {
-      id: number;
-      stem: string;
-      option_a: string;
-      option_b: string;
-      option_c: string;
-      option_d: string;
-      option_e: string | null;
-      correct_answer: string;
-    }[]
-  >([]);
+  const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!hasHydrated) return;
 
     // Basic verification: user must have config and sessionId match
-    if (!config || config.sessionId !== sessionId || questionIds.length === 0) {
+    if (!store.config || store.config.sessionId !== sessionId || store.questionJoinKeys.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -53,8 +30,8 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       const supabase = createClient();
       const { data, error } = await supabase
         .from('questions')
-        .select('question, question_text, option_a, option_b, option_c, option_d, option_e, correct_answer')
-        .in('question', questionIds);
+        .select('*')
+        .in('join_key', store.questionJoinKeys);
 
       if (error || !data) {
         console.error(error);
@@ -63,25 +40,15 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       }
 
       // Preserve the sorted order from setup
-      const ordered = questionIds
-        .map((id) => data.find((q) => q.question === id))
-        .filter((question): question is QuizQuestion => Boolean(question))
-        .map((question) => ({
-          id: question.question,
-          stem: question.question_text,
-          option_a: question.option_a,
-          option_b: question.option_b,
-          option_c: question.option_c,
-          option_d: question.option_d,
-          option_e: question.option_e,
-          correct_answer: question.correct_answer,
-        }));
+      const ordered = store.questionJoinKeys
+        .map((joinKey) => data.find((q) => q.join_key === joinKey))
+        .filter((question): question is QuestionRow => Boolean(question));
       setQuestions(ordered);
       setLoading(false);
     }
 
     fetchQuestions();
-  }, [hasHydrated, sessionId, config, questionIds, router]);
+  }, [hasHydrated, sessionId, store.config, store.questionJoinKeys, router]);
 
   if (loading) {
     return (

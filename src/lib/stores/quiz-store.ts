@@ -8,7 +8,7 @@ export interface QuizConfig {
 }
 
 export interface AnswerRecord {
-  questionId: number;
+  joinKey: string;
   userAnswer: string | null;
   isCorrect: boolean;
   timeTakenMs: number;
@@ -17,7 +17,7 @@ export interface AnswerRecord {
 interface QuizState {
   hasHydrated: boolean;
   config: QuizConfig | null;
-  questionIds: number[];
+  questionJoinKeys: string[];
   answers: AnswerRecord[];
   score: number;
   streak: number;
@@ -25,8 +25,7 @@ interface QuizState {
   
   setHasHydrated: (hasHydrated: boolean) => void;
   setConfig: (config: QuizConfig) => void;
-  setQuestionIds: (ids: number[]) => void;
-  startQuiz: (config: QuizConfig, questionIds: number[]) => void;
+  setQuestionJoinKeys: (joinKeys: string[]) => void;
   addAnswer: (answer: AnswerRecord, pointsAdded: number) => void;
   resetQuizState: () => void;
 }
@@ -36,7 +35,7 @@ export const useQuizStore = create<QuizState>()(
     (set) => ({
       hasHydrated: false,
       config: null,
-      questionIds: [],
+      questionJoinKeys: [],
       answers: [],
       score: 0,
       streak: 0,
@@ -44,16 +43,7 @@ export const useQuizStore = create<QuizState>()(
 
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       setConfig: (config) => set({ config }),
-      setQuestionIds: (questionIds) => set({ questionIds }),
-      startQuiz: (config, questionIds) =>
-        set({
-          config,
-          questionIds,
-          answers: [],
-          score: 0,
-          streak: 0,
-          maxStreak: 0,
-        }),
+      setQuestionJoinKeys: (questionJoinKeys) => set({ questionJoinKeys }),
       addAnswer: (answer, pointsAdded) =>
         set((state) => {
           const newStreak = answer.isCorrect ? state.streak + 1 : 0;
@@ -67,7 +57,7 @@ export const useQuizStore = create<QuizState>()(
       resetQuizState: () =>
         set({
           config: null,
-          questionIds: [],
+          questionJoinKeys: [],
           answers: [],
           score: 0,
           streak: 0,
@@ -77,10 +67,9 @@ export const useQuizStore = create<QuizState>()(
     {
       name: 'medbank-quiz-storage',
       storage: createJSONStorage(() => sessionStorage),
-      version: 1,
       partialize: (state) => ({
         config: state.config,
-        questionIds: state.questionIds,
+        questionJoinKeys: state.questionJoinKeys,
         answers: state.answers,
         score: state.score,
         streak: state.streak,
