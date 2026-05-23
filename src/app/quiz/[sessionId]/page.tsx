@@ -13,10 +13,13 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
   const { sessionId } = use(params);
   const router = useRouter();
   const store = useQuizStore();
+  const hasHydrated = useQuizStore((state) => state.hasHydrated);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!hasHydrated) return;
+
     // Basic verification: user must have config and sessionId match
     if (!store.config || store.config.sessionId !== sessionId || store.questionJoinKeys.length === 0) {
       router.push('/dashboard');
@@ -45,7 +48,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
     }
 
     fetchQuestions();
-  }, [sessionId, store.config, store.questionJoinKeys, router]);
+  }, [hasHydrated, sessionId, store.config, store.questionJoinKeys, router]);
 
   if (loading) {
     return (

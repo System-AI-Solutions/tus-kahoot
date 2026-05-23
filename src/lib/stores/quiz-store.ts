@@ -15,6 +15,7 @@ export interface AnswerRecord {
 }
 
 interface QuizState {
+  hasHydrated: boolean;
   config: QuizConfig | null;
   questionJoinKeys: string[];
   answers: AnswerRecord[];
@@ -22,6 +23,7 @@ interface QuizState {
   streak: number;
   maxStreak: number;
   
+  setHasHydrated: (hasHydrated: boolean) => void;
   setConfig: (config: QuizConfig) => void;
   setQuestionJoinKeys: (joinKeys: string[]) => void;
   addAnswer: (answer: AnswerRecord, pointsAdded: number) => void;
@@ -31,6 +33,7 @@ interface QuizState {
 export const useQuizStore = create<QuizState>()(
   persist(
     (set) => ({
+      hasHydrated: false,
       config: null,
       questionJoinKeys: [],
       answers: [],
@@ -38,6 +41,7 @@ export const useQuizStore = create<QuizState>()(
       streak: 0,
       maxStreak: 0,
 
+      setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       setConfig: (config) => set({ config }),
       setQuestionJoinKeys: (questionJoinKeys) => set({ questionJoinKeys }),
       addAnswer: (answer, pointsAdded) =>
@@ -63,6 +67,20 @@ export const useQuizStore = create<QuizState>()(
     {
       name: 'medbank-quiz-storage',
       storage: createJSONStorage(() => sessionStorage),
+      partialize: (state) => ({
+        config: state.config,
+        questionJoinKeys: state.questionJoinKeys,
+        answers: state.answers,
+        score: state.score,
+        streak: state.streak,
+        maxStreak: state.maxStreak,
+      }),
+      onRehydrateStorage: (state) => {
+        state.setHasHydrated(false);
+        return (state) => {
+          state?.setHasHydrated(true);
+        };
+      },
     }
   )
 );
