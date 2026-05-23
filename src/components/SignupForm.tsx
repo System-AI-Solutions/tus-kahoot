@@ -5,20 +5,22 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
-export function LoginForm() {
+export function SignupForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = createClient();
 
-  const handleLogin = async (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setMessage('');
 
-    const { error } = await supabase.auth.signInWithPassword({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
     });
@@ -26,24 +28,36 @@ export function LoginForm() {
     if (error) {
       setError(error.message);
       setLoading(false);
-    } else {
+      return;
+    }
+
+    if (data.session) {
       router.push('/dashboard');
       router.refresh();
+      return;
     }
+
+    setMessage('Check your email to confirm your account before signing in.');
+    setLoading(false);
   };
 
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md rounded-[var(--radius-card)] bg-[var(--color-card)] p-8 shadow-lg">
         <h1 className="mb-6 text-center text-2xl font-bold tracking-tight text-white">
-          MedBank Login
+          Create Account
         </h1>
         {error && (
           <div className="mb-4 rounded bg-red-900/50 p-3 text-sm text-red-200">
             {error}
           </div>
         )}
-        <form onSubmit={handleLogin} className="space-y-4">
+        {message && (
+          <div className="mb-4 rounded bg-green-900/40 p-3 text-sm text-green-200">
+            {message}
+          </div>
+        )}
+        <form onSubmit={handleSignup} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-[var(--color-muted)]">
               Email
@@ -65,6 +79,7 @@ export function LoginForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
+              minLength={6}
               className="mt-1 block w-full rounded border border-[var(--color-surface)] bg-[#111] p-2 text-white focus:border-white focus:outline-none focus:ring-1 focus:ring-white"
             />
           </div>
@@ -73,17 +88,15 @@ export function LoginForm() {
             disabled={loading}
             className="w-full rounded-[var(--radius-button)] bg-white py-2 font-semibold text-black transition-colors hover:bg-gray-200 disabled:opacity-50"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? 'Creating account...' : 'Sign Up'}
           </button>
         </form>
-        <div className="mt-6 flex items-center justify-between text-sm text-[var(--color-muted)]">
-          <Link href="/signup" className="text-white hover:underline">
-            Create account
+        <p className="mt-6 text-center text-sm text-[var(--color-muted)]">
+          Already have an account?{' '}
+          <Link href="/login" className="text-white hover:underline">
+            Sign in
           </Link>
-          <Link href="/forgot-password" className="text-white hover:underline">
-            Forgot password?
-          </Link>
-        </div>
+        </p>
       </div>
     </div>
   );

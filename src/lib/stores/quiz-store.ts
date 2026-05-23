@@ -77,6 +77,7 @@ export const useQuizStore = create<QuizState>()(
     {
       name: 'medbank-quiz-storage',
       storage: createJSONStorage(() => sessionStorage),
+      version: 1,
       partialize: (state) => ({
         config: state.config,
         questionIds: state.questionIds,

@@ -24,7 +24,6 @@ interface StartQuizResult {
 export function useStartQuiz() {
   const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const startQuiz = useQuizStore((state) => state.startQuiz);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -91,12 +90,19 @@ export function useStartQuiz() {
       }
 
       const sessionId = sessionData.id;
-      startQuiz({ sessionId, timerEnabled, sectionFilter }, questionIds);
+      useQuizStore.setState({
+        config: { sessionId, timerEnabled, sectionFilter },
+        questionIds,
+        answers: [],
+        score: 0,
+        streak: 0,
+        maxStreak: 0,
+      });
       router.push(`/quiz/${sessionId}`);
 
       return { ok: true };
     },
-    [router, startQuiz, supabase]
+    [router, supabase]
   );
 
   return { start, loading, error, setError };
