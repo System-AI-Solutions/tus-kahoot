@@ -12,8 +12,9 @@ type QuestionRow = Database['public']['Tables']['questions']['Row'];
 export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
   const router = useRouter();
-  const store = useQuizStore();
   const hasHydrated = useQuizStore((state) => state.hasHydrated);
+  const config = useQuizStore((state) => state.config);
+  const questionJoinKeys = useQuizStore((state) => state.questionJoinKeys);
   const [questions, setQuestions] = useState<QuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -21,7 +22,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
     if (!hasHydrated) return;
 
     // Basic verification: user must have config and sessionId match
-    if (!store.config || store.config.sessionId !== sessionId || store.questionJoinKeys.length === 0) {
+    if (!config || config.sessionId !== sessionId || questionJoinKeys.length === 0) {
       router.push('/dashboard');
       return;
     }
@@ -31,7 +32,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       const { data, error } = await supabase
         .from('questions')
         .select('*')
-        .in('join_key', store.questionJoinKeys);
+        .in('join_key', questionJoinKeys);
 
       if (error || !data) {
         console.error(error);
@@ -40,7 +41,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       }
 
       // Preserve the sorted order from setup
-      const ordered = store.questionJoinKeys
+      const ordered = questionJoinKeys
         .map((joinKey) => data.find((q) => q.join_key === joinKey))
         .filter((question): question is QuestionRow => Boolean(question));
       setQuestions(ordered);
@@ -48,7 +49,7 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
     }
 
     fetchQuestions();
-  }, [hasHydrated, sessionId, store.config, store.questionJoinKeys, router]);
+  }, [hasHydrated, sessionId, config, questionJoinKeys, router]);
 
   if (loading) {
     return (

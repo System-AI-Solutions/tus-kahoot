@@ -26,6 +26,7 @@ interface QuizState {
   setHasHydrated: (hasHydrated: boolean) => void;
   setConfig: (config: QuizConfig) => void;
   setQuestionJoinKeys: (joinKeys: string[]) => void;
+  startQuiz: (config: QuizConfig, questionJoinKeys: string[]) => void;
   addAnswer: (answer: AnswerRecord, pointsAdded: number) => void;
   resetQuizState: () => void;
 }
@@ -44,6 +45,15 @@ export const useQuizStore = create<QuizState>()(
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
       setConfig: (config) => set({ config }),
       setQuestionJoinKeys: (questionJoinKeys) => set({ questionJoinKeys }),
+      startQuiz: (config, questionJoinKeys) =>
+        set({
+          config,
+          questionJoinKeys,
+          answers: [],
+          score: 0,
+          streak: 0,
+          maxStreak: 0,
+        }),
       addAnswer: (answer, pointsAdded) =>
         set((state) => {
           const newStreak = answer.isCorrect ? state.streak + 1 : 0;
