@@ -162,15 +162,13 @@ export default function QuizSetupPage() {
 
       const sessionId = sessionData.id;
 
-      useQuizStore.setState({
-        config: { sessionId, timerEnabled, sectionFilter: null },
-        questionJoinKeys,
-        answers: [],
-        score: 0,
-        streak: 0,
-        maxStreak: 0,
-      });
-      window.location.assign(`/quiz/${sessionId}`);
+      useQuizStore.getState().startQuiz(
+        { sessionId, timerEnabled, sectionFilter: null },
+        questionJoinKeys
+      );
+      window.setTimeout(() => {
+        window.location.assign(`/quiz/${sessionId}`);
+      }, 0);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not start quiz.');
       setLoading(false);
