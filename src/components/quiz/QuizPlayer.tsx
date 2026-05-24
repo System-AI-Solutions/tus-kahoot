@@ -7,7 +7,7 @@ import { QuizTopBar } from './QuizTopBar';
 import { QuestionCard } from './QuestionCard';
 import { AnswerGrid } from './AnswerGrid';
 import { FeedbackBanner } from './FeedbackBanner';
-import { TIMER_DURATION_MS } from '@/lib/constants';
+import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 
 interface QuestionData {
@@ -19,11 +19,11 @@ interface QuestionData {
   option_c: string;
   option_d: string;
   option_e: string | null;
-  correct_answer: 'A' | 'B' | 'C' | 'D' | 'E';
+  correct_answer: AnswerLetter;
 }
 
 interface AnswerOption {
-  letter: 'A' | 'B' | 'C' | 'D' | 'E';
+  letter: AnswerLetter;
   text: string;
 }
 

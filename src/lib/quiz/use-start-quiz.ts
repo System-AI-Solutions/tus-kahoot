@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
-import type { SubtopicTag } from '@/lib/constants';
+import { ANSWER_LETTERS, type SubtopicTag } from '@/lib/constants';
 
 type SectionFilter = 'all' | 'basic_sciences' | 'clinical_sciences';
 
@@ -50,7 +50,11 @@ export function useStartQuiz() {
         return { ok: false, error: 'Not signed in.' };
       }
 
-      let query = supabase.from('questions').select('join_key');
+      let query = supabase
+        .from('questions')
+        .select('join_key')
+        .not('join_key', 'is', null)
+        .in('correct_answer', [...ANSWER_LETTERS]);
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
 

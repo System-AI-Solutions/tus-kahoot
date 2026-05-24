@@ -7,13 +7,41 @@ import { readPersistedQuizState, useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { QuizPlayer } from '@/components/quiz/QuizPlayer';
+import { isAnswerLetter } from '@/lib/constants';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 
-export default function QuizPage() {
-  const params = useParams<{ sessionId: string }>();
-  const sessionId = params.sessionId;
+function hasSelectedAnswerOption(question: QuestionRow) {
+  if (!isAnswerLetter(question.correct_answer)) return false;
+
+  let answerText: string | null;
+
+  switch (question.correct_answer) {
+    case 'A':
+      answerText = question.option_a;
+      break;
+    case 'B':
+      answerText = question.option_b;
+      break;
+    case 'C':
+      answerText = question.option_c;
+      break;
+    case 'D':
+      answerText = question.option_d;
+      break;
+    case 'E':
+      answerText = question.option_e;
+      break;
+  }
+
+  return typeof answerText === 'string' && answerText.trim().length > 0;
+}
+
+export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
+  const { sessionId } = use(params);
+  const router = useRouter();
+  const store = useQuizStore();
   const hasHydrated = useQuizStore((state) => state.hasHydrated);
   const config = useQuizStore((state) => state.config);
   const questionJoinKeys = useQuizStore((state) => state.questionJoinKeys);
@@ -86,18 +114,28 @@ export default function QuizPage() {
       // Preserve the sorted order from setup
       const ordered = activeQuestionJoinKeys
         .map((joinKey) => data.find((q) => q.join_key === joinKey))
-        .filter((question): question is QuestionRow => Boolean(question));
+        .filter((question): question is QuestionRow => Boolean(question))
+        .filter(hasSelectedAnswerOption);
 
       if (ordered.length === 0) {
-        setLoadError('No questions were found for this quiz. Please start a new quiz.');
-        setLoading(false);
+        console.error('Quiz contains no playable questions after answer validation.', {
+          sessionId,
+          requestedJoinKeys: store.questionJoinKeys,
+        });
+        router.push('/dashboard');
         return;
       }
 
-      if (!cancelled) {
-        setQuestions(ordered);
-        setLoading(false);
+      if (ordered.length !== store.questionJoinKeys.length) {
+        console.error('Quiz contained invalid questions that were removed before play.', {
+          sessionId,
+          requestedCount: store.questionJoinKeys.length,
+          playableCount: ordered.length,
+        });
       }
+
+      setQuestions(ordered);
+      setLoading(false);
     }
 
     fetchQuestions();
