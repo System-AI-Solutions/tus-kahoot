@@ -11,6 +11,7 @@ export interface QuizConfig {
 
 export interface AnswerRecord {
   joinKey: string;
+  questionNumber: number | null;
   userAnswer: string | null;
   isCorrect: boolean;
   timeTakenMs: number;

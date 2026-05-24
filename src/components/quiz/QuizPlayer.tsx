@@ -11,7 +11,8 @@ import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 
 interface QuestionData {
-  question: number;
+  question?: number | null;
+  question_number?: number | null;
   join_key: string;
   question_text: string;
   option_a: string;
@@ -25,6 +26,10 @@ interface QuestionData {
 interface AnswerOption {
   letter: AnswerLetter;
   text: string;
+}
+
+function getSourceQuestionNumber(question: QuestionData) {
+  return question.question_number ?? question.question ?? null;
 }
 
 export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
@@ -82,6 +87,7 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
 
       store.addAnswer({
         joinKey: activeQuestion.join_key,
+        questionNumber: getSourceQuestionNumber(activeQuestion),
         userAnswer: letter,
         isCorrect,
         timeTakenMs: TIMER_DURATION_MS - timeRemainingMs,

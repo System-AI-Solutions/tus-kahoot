@@ -38,10 +38,9 @@ function hasSelectedAnswerOption(question: QuestionRow) {
   return typeof answerText === 'string' && answerText.trim().length > 0;
 }
 
-export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
-  const { sessionId } = use(params);
-  const router = useRouter();
-  const store = useQuizStore();
+export default function QuizPage() {
+  const params = useParams<{ sessionId: string }>();
+  const sessionId = params.sessionId;
   const hasHydrated = useQuizStore((state) => state.hasHydrated);
   const config = useQuizStore((state) => state.config);
   const questionJoinKeys = useQuizStore((state) => state.questionJoinKeys);
@@ -120,16 +119,19 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       if (ordered.length === 0) {
         console.error('Quiz contains no playable questions after answer validation.', {
           sessionId,
-          requestedJoinKeys: store.questionJoinKeys,
+          requestedJoinKeys: activeQuestionJoinKeys,
         });
-        router.push('/dashboard');
+        if (!cancelled) {
+          setLoadError('This quiz no longer contains playable questions. Please start a new quiz.');
+          setLoading(false);
+        }
         return;
       }
 
-      if (ordered.length !== store.questionJoinKeys.length) {
+      if (ordered.length !== activeQuestionJoinKeys.length) {
         console.error('Quiz contained invalid questions that were removed before play.', {
           sessionId,
-          requestedCount: store.questionJoinKeys.length,
+          requestedCount: activeQuestionJoinKeys.length,
           playableCount: ordered.length,
         });
       }
