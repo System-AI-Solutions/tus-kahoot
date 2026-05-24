@@ -46,5 +46,13 @@ export const ANSWER_COLORS = {
   E: 'bg-[var(--color-answer-e)]',
 } as const;
 
+export const ANSWER_LETTERS = ['A', 'B', 'C', 'D', 'E'] as const;
+
+export type AnswerLetter = (typeof ANSWER_LETTERS)[number];
+
+export function isAnswerLetter(value: unknown): value is AnswerLetter {
+  return typeof value === 'string' && (ANSWER_LETTERS as readonly string[]).includes(value);
+}
+
 export const TIMER_DURATION_MS = 30000;
 export const MAX_QUESTIONS = 120;

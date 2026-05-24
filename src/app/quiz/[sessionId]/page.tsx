@@ -5,9 +5,36 @@ import { useRouter } from 'next/navigation';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { QuizPlayer } from '@/components/quiz/QuizPlayer';
+import { isAnswerLetter } from '@/lib/constants';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
+
+function hasSelectedAnswerOption(question: QuestionRow) {
+  if (!isAnswerLetter(question.correct_answer)) return false;
+
+  let answerText: string | null;
+
+  switch (question.correct_answer) {
+    case 'A':
+      answerText = question.option_a;
+      break;
+    case 'B':
+      answerText = question.option_b;
+      break;
+    case 'C':
+      answerText = question.option_c;
+      break;
+    case 'D':
+      answerText = question.option_d;
+      break;
+    case 'E':
+      answerText = question.option_e;
+      break;
+  }
+
+  return typeof answerText === 'string' && answerText.trim().length > 0;
+}
 
 export default function QuizPage({ params }: { params: Promise<{ sessionId: string }> }) {
   const { sessionId } = use(params);
@@ -42,7 +69,26 @@ export default function QuizPage({ params }: { params: Promise<{ sessionId: stri
       // Preserve the sorted order from setup
       const ordered = store.questionJoinKeys
         .map((joinKey) => data.find((q) => q.join_key === joinKey))
-        .filter((question): question is QuestionRow => Boolean(question));
+        .filter((question): question is QuestionRow => Boolean(question))
+        .filter(hasSelectedAnswerOption);
+
+      if (ordered.length === 0) {
+        console.error('Quiz contains no playable questions after answer validation.', {
+          sessionId,
+          requestedJoinKeys: store.questionJoinKeys,
+        });
+        router.push('/dashboard');
+        return;
+      }
+
+      if (ordered.length !== store.questionJoinKeys.length) {
+        console.error('Quiz contained invalid questions that were removed before play.', {
+          sessionId,
+          requestedCount: store.questionJoinKeys.length,
+          playableCount: ordered.length,
+        });
+      }
+
       setQuestions(ordered);
       setLoading(false);
     }

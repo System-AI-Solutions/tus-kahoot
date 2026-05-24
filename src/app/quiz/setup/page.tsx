@@ -7,7 +7,7 @@ import { useQuizStore } from '@/lib/stores/quiz-store';
 import { PillToggle } from '@/components/ui/PillToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
-import { isSubtopicTag, type SubtopicTag } from '@/lib/constants';
+import { ANSWER_LETTERS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
 import { formatTopic } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
 
@@ -96,7 +96,11 @@ export default function QuizSetupPage() {
   // Live matching count (debounced slightly by effect)
   useEffect(() => {
     async function fetchCount() {
-      let query = supabase.from('questions').select('join_key', { count: 'exact', head: true });
+      let query = supabase
+        .from('questions')
+        .select('join_key', { count: 'exact', head: true })
+        .not('join_key', 'is', null)
+        .in('correct_answer', [...ANSWER_LETTERS]);
       if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
@@ -144,7 +148,11 @@ export default function QuizSetupPage() {
     const sessionId = sessionData.id;
 
     // 2. Fetch randomized questions
-    let query = supabase.from('questions').select('join_key');
+    let query = supabase
+      .from('questions')
+      .select('join_key')
+      .not('join_key', 'is', null)
+      .in('correct_answer', [...ANSWER_LETTERS]);
     if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
     if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
     if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
@@ -160,7 +168,9 @@ export default function QuizSetupPage() {
       // Shuffle & limit
       const shuffled = [...qs].sort(() => 0.5 - Math.random());
       const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-      const questionJoinKeys = selectedQs.map((q) => q.join_key);
+      const questionJoinKeys = selectedQs
+        .map((q) => q.join_key)
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
 
       // 3. Set Store
       setConfig({ sessionId, timerEnabled, sectionFilter: null });
