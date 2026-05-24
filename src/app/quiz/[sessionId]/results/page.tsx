@@ -2,11 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { readPersistedQuizState, useQuizStore } from '@/lib/stores/quiz-store';
+import {
+  readPersistedQuizState,
+  useQuizStore,
+  type AnswerRecord,
+} from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { AccuracyRing } from '@/components/ui/AccuracyRing';
 import Link from 'next/link';
+
+type PersistableAnswerRecord = AnswerRecord & { questionNumber: number };
+
+function hasPersistableQuestionNumber(answer: AnswerRecord): answer is PersistableAnswerRecord {
+  return typeof answer.questionNumber === 'number' && Number.isInteger(answer.questionNumber);
+}
 
 export default function ResultsPage() {
   const params = useParams<{ sessionId: string }>();
@@ -47,7 +57,6 @@ export default function ResultsPage() {
       return;
     }
 
-    // Basic verification
     if (!config || config.sessionId !== sessionId || answers.length === 0) {
       queueMicrotask(() => {
         if (!cancelled) {
@@ -70,6 +79,7 @@ export default function ResultsPage() {
         data: { user },
         error: userError,
       } = await supabase.auth.getUser();
+
       if (userError || !user) {
         if (!cancelled) {
           setSaveError(userError?.message || 'You must be logged in to save results.');
@@ -78,18 +88,28 @@ export default function ResultsPage() {
         return;
       }
 
-      // 1. Save all attempts
-      const attemptsToInsert = answers.map((a) => ({
+      if (!answers.every(hasPersistableQuestionNumber)) {
+        console.error('Could not save attempts: missing question number.', { sessionId, answers });
+        if (!cancelled) {
+          setSaveError('Could not save attempts: missing question number.');
+          setLoading(false);
+        }
+        return;
+      }
+
+      const attemptsToInsert = answers.map((answer) => ({
         user_id: user.id,
         session_id: sessionId,
-        join_key: a.joinKey,
-        user_answer: a.userAnswer,
-        is_correct: a.isCorrect,
-        time_taken_ms: a.timeTakenMs,
+        join_key: answer.joinKey,
+        question_number: answer.questionNumber,
+        user_answer: answer.userAnswer,
+        is_correct: answer.isCorrect,
+        time_taken_ms: answer.timeTakenMs,
       }));
 
       const { error: attemptsError } = await supabase.from('attempts').insert(attemptsToInsert);
       if (attemptsError) {
+        console.error(attemptsError);
         if (!cancelled) {
           setSaveError(`Could not save attempts: ${attemptsError.message}`);
           setLoading(false);
@@ -97,7 +117,6 @@ export default function ResultsPage() {
         return;
       }
 
-      // 2. Update session score & streak
       const { error: sessionError } = await supabase
         .from('sessions')
         .update({
@@ -108,6 +127,7 @@ export default function ResultsPage() {
         .eq('id', sessionId);
 
       if (sessionError) {
+        console.error(sessionError);
         if (!cancelled) {
           setSaveError(`Could not update session: ${sessionError.message}`);
           setLoading(false);
@@ -172,13 +192,13 @@ export default function ResultsPage() {
       <main className="mx-auto mt-8 max-w-4xl px-4">
         <div className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-8 text-center shadow-xl">
           <h1 className="text-3xl font-bold text-white">Quiz Completed!</h1>
-          
+
           <div className="mt-8 flex flex-col items-center justify-center gap-8 md:flex-row md:gap-16">
             <div className="flex flex-col items-center">
               <span className="text-sm font-medium text-[var(--color-muted)]">Final Score</span>
               <span className="mt-2 text-5xl font-black text-white">{score}</span>
             </div>
-            
+
             <div className="flex flex-col items-center">
               <span className="mb-2 text-sm font-medium text-[var(--color-muted)]">Accuracy</span>
               <AccuracyRing percentage={accuracy} size={100} strokeWidth={8} />
@@ -186,7 +206,7 @@ export default function ResultsPage() {
 
             <div className="flex flex-col items-center">
               <span className="text-sm font-medium text-[var(--color-muted)]">Max Streak</span>
-              <span className="mt-2 text-4xl font-bold text-orange-500">🔥 {maxStreak}</span>
+              <span className="mt-2 text-4xl font-bold text-orange-500">ðŸ”¥ {maxStreak}</span>
             </div>
           </div>
 
@@ -224,17 +244,21 @@ export default function ResultsPage() {
                 </tr>
               </thead>
               <tbody>
-                {answers.map((a, i) => (
-                  <tr key={i} className="border-b border-[#222]">
-                    <td className="px-4 py-3 text-white">Q{i + 1}</td>
+                {answers.map((answer, index) => (
+                  <tr key={index} className="border-b border-[#222]">
+                    <td className="px-4 py-3 text-white">Q{index + 1}</td>
                     <td className="px-4 py-3">
-                      {a.isCorrect ? (
-                        <span className="font-bold text-[var(--color-correct-banner)]">✓ Correct</span>
+                      {answer.isCorrect ? (
+                        <span className="font-bold text-[var(--color-correct-banner)]">
+                          âœ“ Correct
+                        </span>
                       ) : (
-                        <span className="font-bold text-[var(--color-wrong-banner)]">✗ Wrong</span>
+                        <span className="font-bold text-[var(--color-wrong-banner)]">
+                          âœ— Wrong
+                        </span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{(a.timeTakenMs / 1000).toFixed(1)}s</td>
+                    <td className="px-4 py-3">{(answer.timeTakenMs / 1000).toFixed(1)}s</td>
                   </tr>
                 ))}
               </tbody>

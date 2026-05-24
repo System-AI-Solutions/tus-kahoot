@@ -124,7 +124,11 @@ export default function QuizSetupPage() {
       }
 
       // 1. Fetch and validate questions before creating a session.
-      let query = supabase.from('questions').select('join_key');
+      let query = supabase
+        .from('questions')
+        .select('join_key')
+        .not('join_key', 'is', null)
+        .in('correct_answer', [...ANSWER_LETTERS]);
       if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
       if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
@@ -138,26 +142,9 @@ export default function QuizSetupPage() {
         .map((q) => q.join_key)
         .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
 
-    // 2. Fetch randomized questions
-    let query = supabase
-      .from('questions')
-      .select('join_key')
-      .not('join_key', 'is', null)
-      .in('correct_answer', [...ANSWER_LETTERS]);
-    if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
-    if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
-    if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
-
       const shuffled = [...availableJoinKeys].sort(() => 0.5 - Math.random());
       const questionJoinKeys = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
 
-    if (qs && qs.length > 0) {
-      // Shuffle & limit
-      const shuffled = [...qs].sort(() => 0.5 - Math.random());
-      const selectedQs = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-      const questionJoinKeys = selectedQs
-        .map((q) => q.join_key)
-        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
       if (questionJoinKeys.length === 0) {
         throw new Error('No questions matched the selected filters.');
       }

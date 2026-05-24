@@ -137,6 +137,7 @@ export interface Database {
           user_id: string
           session_id: string
           question_id: number | null
+          question_number: number
           join_key: string
           user_answer: string | null
           is_correct: boolean
@@ -148,6 +149,7 @@ export interface Database {
           user_id: string
           session_id: string
           question_id?: number | null
+          question_number: number
           join_key: string
           user_answer?: string | null
           is_correct?: boolean
