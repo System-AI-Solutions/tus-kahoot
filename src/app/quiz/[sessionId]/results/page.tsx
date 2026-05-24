@@ -2,21 +2,11 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import {
-  readPersistedQuizState,
-  useQuizStore,
-  type AnswerRecord,
-} from '@/lib/stores/quiz-store';
+import { readPersistedQuizState, useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { AccuracyRing } from '@/components/ui/AccuracyRing';
 import Link from 'next/link';
-
-type PersistableAnswerRecord = AnswerRecord & { questionNumber: number };
-
-function hasPersistableQuestionNumber(answer: AnswerRecord): answer is PersistableAnswerRecord {
-  return typeof answer.questionNumber === 'number' && Number.isInteger(answer.questionNumber);
-}
 
 export default function ResultsPage() {
   const params = useParams<{ sessionId: string }>();
@@ -88,10 +78,50 @@ export default function ResultsPage() {
         return;
       }
 
-      if (!answers.every(hasPersistableQuestionNumber)) {
-        console.error('Could not save attempts: missing question number.', { sessionId, answers });
+      const answerJoinKeys = Array.from(new Set(answers.map((answer) => answer.joinKey)));
+      if (answerJoinKeys.some((joinKey) => typeof joinKey !== 'string' || joinKey.length === 0)) {
+        console.error('Could not save attempts: missing join key.', { sessionId, answers });
         if (!cancelled) {
-          setSaveError('Could not save attempts: missing question number.');
+          setSaveError('Could not save attempts: missing question identifier.');
+          setLoading(false);
+        }
+        return;
+      }
+
+      const { data: questionNumberRows, error: questionNumbersError } = await supabase
+        .from('questions')
+        .select('join_key, question_number')
+        .in('join_key', answerJoinKeys);
+
+      if (questionNumbersError || !questionNumberRows) {
+        console.error(questionNumbersError);
+        if (!cancelled) {
+          setSaveError(
+            `Could not resolve question numbers: ${
+              questionNumbersError?.message || 'No question data returned'
+            }`
+          );
+          setLoading(false);
+        }
+        return;
+      }
+
+      const questionNumberByJoinKey = new Map(
+        questionNumberRows.map((question) => [question.join_key, question.question_number])
+      );
+      const unresolvedJoinKeys = answerJoinKeys.filter(
+        (joinKey) => typeof questionNumberByJoinKey.get(joinKey) !== 'number'
+      );
+
+      if (unresolvedJoinKeys.length > 0) {
+        console.error('Could not save attempts: unresolved question numbers.', {
+          sessionId,
+          unresolvedJoinKeys,
+        });
+        if (!cancelled) {
+          setSaveError(
+            'Could not save attempts: missing question number for one or more questions.'
+          );
           setLoading(false);
         }
         return;
@@ -101,7 +131,7 @@ export default function ResultsPage() {
         user_id: user.id,
         session_id: sessionId,
         join_key: answer.joinKey,
-        question_number: answer.questionNumber,
+        question_number: questionNumberByJoinKey.get(answer.joinKey) as number,
         user_answer: answer.userAnswer,
         is_correct: answer.isCorrect,
         time_taken_ms: answer.timeTakenMs,

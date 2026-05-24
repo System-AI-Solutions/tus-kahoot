@@ -3,6 +3,7 @@ import { Header } from '@/components/Header';
 import { formatTopic } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
 import Link from 'next/link';
+import { isAnswerLetter } from '@/lib/constants';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 type BookmarkQuestion = Pick<
@@ -14,6 +15,17 @@ type BookmarkRow = {
   questions: BookmarkQuestion | null;
 };
 type AnswerOptionKey = 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e';
+
+function getCorrectAnswerText(question: BookmarkQuestion) {
+  if (!isAnswerLetter(question.correct_answer)) return null;
+
+  const answerKey = `option_${question.correct_answer.toLowerCase()}` as AnswerOptionKey;
+  const answerText = question[answerKey];
+
+  if (typeof answerText !== 'string' || answerText.trim().length === 0) return null;
+
+  return `${question.correct_answer}: ${answerText}`;
+}
 
 export default async function BookmarksPage() {
   const supabase = await createClient();
@@ -59,7 +71,7 @@ export default async function BookmarksPage() {
             {bookmarks.map((b) => {
               const q = b.questions;
               if (!q) return null;
-              const answerKey = `option_${q.correct_answer.toLowerCase()}` as AnswerOptionKey;
+              const correctAnswerText = getCorrectAnswerText(q);
               return (
                 <div key={b.id} className="flex flex-col justify-between rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-lg">
                   <div>
@@ -73,7 +85,7 @@ export default async function BookmarksPage() {
                   <div className="rounded bg-[var(--color-surface)] p-3">
                     <div className="text-xs font-bold text-[var(--color-muted)]">Correct Answer</div>
                     <div className="text-sm font-bold text-[var(--color-correct-banner)]">
-                      {q.correct_answer}: {q[answerKey]}
+                      {correctAnswerText ?? 'Unavailable'}
                     </div>
                   </div>
                 </div>

@@ -11,8 +11,7 @@ import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 
 interface QuestionData {
-  question?: number | null;
-  question_number?: number | null;
+  question_number: number;
   join_key: string;
   question_text: string;
   option_a: string;
@@ -29,7 +28,7 @@ interface AnswerOption {
 }
 
 function getSourceQuestionNumber(question: QuestionData) {
-  return question.question_number ?? question.question ?? null;
+  return question.question_number;
 }
 
 export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
