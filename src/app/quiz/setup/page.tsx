@@ -25,7 +25,6 @@ function formatSupabaseError(error: SupabaseErrorLike) {
 
 export default function QuizSetupPage() {
   const supabase = useMemo(() => createClient(), []);
-  const startQuiz = useQuizStore((state) => state.startQuiz);
 
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -163,7 +162,14 @@ export default function QuizSetupPage() {
 
       const sessionId = sessionData.id;
 
-      startQuiz({ sessionId, timerEnabled, sectionFilter: null }, questionJoinKeys);
+      useQuizStore.setState({
+        config: { sessionId, timerEnabled, sectionFilter: null },
+        questionJoinKeys,
+        answers: [],
+        score: 0,
+        streak: 0,
+        maxStreak: 0,
+      });
       window.location.assign(`/quiz/${sessionId}`);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not start quiz.');
