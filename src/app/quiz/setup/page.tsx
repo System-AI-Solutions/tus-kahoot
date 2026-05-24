@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { PillToggle } from '@/components/ui/PillToggle';
@@ -25,10 +24,7 @@ function formatSupabaseError(error: SupabaseErrorLike) {
 }
 
 export default function QuizSetupPage() {
-  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
-  const setConfig = useQuizStore((state) => state.setConfig);
-  const setQuestionJoinKeys = useQuizStore((state) => state.setQuestionJoinKeys);
 
   const [availableTopics, setAvailableTopics] = useState<string[]>([]);
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
@@ -121,31 +117,26 @@ export default function QuizSetupPage() {
     setErrorMessage(null);
     setLoading(true);
 
-    const { data: userData, error: userError } = await supabase.auth.getUser();
-    if (userError || !userData?.user) {
-      setErrorMessage(userError?.message || 'You must be logged in to start a quiz.');
-      setLoading(false);
-      return;
-    }
+    try {
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+      if (userError || !userData?.user) {
+        throw new Error(userError?.message || 'You must be logged in to start a quiz.');
+      }
 
-    // 1. Create session
-    const { data: sessionData, error: sessionError } = await supabase
-      .from('sessions')
-      .insert({
-        user_id: userData.user.id,
-        timer_enabled: timerEnabled,
-        section_filter: null,
-      })
-      .select('id')
-      .single();
+      // 1. Fetch and validate questions before creating a session.
+      let query = supabase.from('questions').select('join_key');
+      if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
+      if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
+      if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
 
-    if (sessionError || !sessionData) {
-      console.error(sessionError);
-      setLoading(false);
-      return;
-    }
+      const { data: qs, error: questionsError } = await query;
+      if (questionsError) {
+        throw new Error(`Could not load questions: ${formatSupabaseError(questionsError)}`);
+      }
 
-    const sessionId = sessionData.id;
+      const availableJoinKeys = (qs || [])
+        .map((q) => q.join_key)
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
 
     // 2. Fetch randomized questions
     let query = supabase
@@ -157,12 +148,8 @@ export default function QuizSetupPage() {
     if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
     if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
 
-    const { data: qs, error: questionsError } = await query;
-    if (questionsError) {
-      setErrorMessage(`Could not load questions: ${formatSupabaseError(questionsError)}`);
-      setLoading(false);
-      return;
-    }
+      const shuffled = [...availableJoinKeys].sort(() => 0.5 - Math.random());
+      const questionJoinKeys = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
 
     if (qs && qs.length > 0) {
       // Shuffle & limit
@@ -171,15 +158,36 @@ export default function QuizSetupPage() {
       const questionJoinKeys = selectedQs
         .map((q) => q.join_key)
         .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
+      if (questionJoinKeys.length === 0) {
+        throw new Error('No questions matched the selected filters.');
+      }
 
-      // 3. Set Store
-      setConfig({ sessionId, timerEnabled, sectionFilter: null });
-      setQuestionJoinKeys(questionJoinKeys);
+      // 2. Create session only after the question set is known to be valid.
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('sessions')
+        .insert({
+          user_id: userData.user.id,
+          timer_enabled: timerEnabled,
+          section_filter: null,
+        })
+        .select('id')
+        .single();
 
-      // 4. Navigate
-      router.push(`/quiz/${sessionId}`);
-    } else {
-      setErrorMessage('No questions matched the selected filters.');
+      if (sessionError || !sessionData) {
+        throw new Error(`Could not create quiz session: ${sessionError ? formatSupabaseError(sessionError) : 'No session returned'}`);
+      }
+
+      const sessionId = sessionData.id;
+
+      useQuizStore.getState().startQuiz(
+        { sessionId, timerEnabled, sectionFilter: null },
+        questionJoinKeys
+      );
+      window.setTimeout(() => {
+        window.location.assign(`/quiz/${sessionId}`);
+      }, 0);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not start quiz.');
       setLoading(false);
     }
   };

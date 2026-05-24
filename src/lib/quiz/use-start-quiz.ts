@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { ANSWER_LETTERS, type SubtopicTag } from '@/lib/constants';
@@ -22,7 +21,6 @@ interface StartQuizResult {
 }
 
 export function useStartQuiz() {
-  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +46,7 @@ export function useStartQuiz() {
       const { data: userData } = await supabase.auth.getUser();
       if (!userData?.user) {
         setLoading(false);
-        router.push('/login');
+        window.location.assign('/login');
         return { ok: false, error: 'Not signed in.' };
       }
 
@@ -96,19 +94,12 @@ export function useStartQuiz() {
       }
 
       const sessionId = sessionData.id;
-      useQuizStore.setState({
-        config: { sessionId, timerEnabled, sectionFilter },
-        questionJoinKeys,
-        answers: [],
-        score: 0,
-        streak: 0,
-        maxStreak: 0,
-      });
-      router.push(`/quiz/${sessionId}`);
+      useQuizStore.getState().startQuiz({ sessionId, timerEnabled, sectionFilter }, questionJoinKeys);
+      window.location.assign(`/quiz/${sessionId}`);
 
       return { ok: true };
     },
-    [router, supabase]
+    [supabase]
   );
 
   return { start, loading, error, setError };
