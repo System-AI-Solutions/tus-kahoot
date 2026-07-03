@@ -1,6 +1,6 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
-import { formatTopic, cn } from '@/lib/utils';
+import { formatTopic, formatExamSource, cn } from '@/lib/utils';
 import Link from 'next/link';
 import { ANSWER_COLORS, isAnswerLetter, type AnswerLetter } from '@/lib/constants';
 import type { Database } from '@/lib/types/database';
@@ -8,7 +8,7 @@ import type { Database } from '@/lib/types/database';
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 type ReviewQuestion = Pick<
   QuestionRow,
-  'join_key' | 'topic' | 'question_text' | 'correct_answer' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e'
+  'join_key' | 'topic' | 'question_text' | 'correct_answer' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e' | 'question_number' | 'source_file'
 >;
 type ReviewAttempt = {
   id: string;
@@ -46,7 +46,9 @@ export default async function ReviewPage() {
         option_b,
         option_c,
         option_d,
-        option_e
+        option_e,
+        question_number,
+        source_file
       )
     `)
     .eq('is_correct', false)
@@ -102,8 +104,15 @@ export default async function ReviewPage() {
                       toAnswerOption('E', q.option_e),
                     ].filter((option): option is AnswerOption => Boolean(option));
 
+                    const examSource = formatExamSource(q.source_file, q.question_number);
+
                     return (
                       <div key={a.id} className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-md">
+                        {examSource && (
+                          <span className="mb-3 inline-block rounded-[var(--radius-chip)] bg-blue-600/20 px-3 py-1 text-xs font-bold text-blue-200">
+                            {examSource}
+                          </span>
+                        )}
                         <p className="mb-6 font-medium text-white">
                           {q.question_text || 'Question text unavailable'}
                         </p>

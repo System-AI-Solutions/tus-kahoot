@@ -11,6 +11,8 @@ import { formatTopic } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
+type SupabaseBrowserClient = ReturnType<typeof createClient>;
+type RepeatMode = 'all' | 'unseen';
 
 type SupabaseErrorLike = {
   message?: string;
@@ -19,8 +21,110 @@ type SupabaseErrorLike = {
   code?: string;
 };
 
+// PostgREST caps a single select at 1000 rows, so key fetches must paginate.
+const QUERY_PAGE_SIZE = 1000;
+
 function formatSupabaseError(error: SupabaseErrorLike) {
   return error.message || error.details || error.hint || error.code || 'Unknown Supabase error';
+}
+
+interface QuestionFilters {
+  excludeIncomplete: boolean;
+  topics: string[];
+  subtopics: SubtopicTag[];
+  searchFilter: string | null;
+}
+
+// Turns "tuberculosis, thyroid" into a PostgREST or() filter matching the
+// question stem or any option. Characters with meaning in the or()/LIKE
+// syntax are stripped so user input cannot break the query.
+function buildSearchOrFilter(rawSearch: string): string | null {
+  const terms = rawSearch
+    .split(',')
+    .map((term) => term.trim().replace(/[,()\\%_"']/g, ''))
+    .filter((term) => term.length >= 2);
+
+  if (terms.length === 0) return null;
+
+  const columns = ['question_text', 'option_a', 'option_b', 'option_c', 'option_d', 'option_e'];
+  return terms
+    .flatMap((term) => columns.map((column) => `${column}.ilike.%${term}%`))
+    .join(',');
+}
+
+function buildJoinKeyQuery(
+  supabase: SupabaseBrowserClient,
+  filters: QuestionFilters,
+  options?: { countOnly?: boolean }
+) {
+  let query = supabase
+    .from('questions')
+    .select('join_key', options?.countOnly ? { count: 'exact', head: true } : undefined)
+    .not('join_key', 'is', null)
+    .in('correct_answer', [...ANSWER_LETTERS]);
+
+  if (filters.excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
+  if (filters.topics.length > 0) query = query.in('topic', filters.topics);
+  if (filters.subtopics.length > 0) query = query.in('subtopic', filters.subtopics);
+  if (filters.searchFilter) query = query.or(filters.searchFilter);
+
+  return query;
+}
+
+async function fetchMatchingJoinKeys(
+  supabase: SupabaseBrowserClient,
+  filters: QuestionFilters
+): Promise<string[]> {
+  const joinKeys: string[] = [];
+
+  for (let from = 0; ; from += QUERY_PAGE_SIZE) {
+    const { data, error } = await buildJoinKeyQuery(supabase, filters).range(
+      from,
+      from + QUERY_PAGE_SIZE - 1
+    );
+
+    if (error) {
+      throw new Error(`Could not load questions: ${formatSupabaseError(error)}`);
+    }
+
+    const batch = data || [];
+    joinKeys.push(
+      ...batch
+        .map((row) => row.join_key)
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0)
+    );
+
+    if (batch.length < QUERY_PAGE_SIZE) break;
+  }
+
+  return joinKeys;
+}
+
+// RLS limits attempts to the signed-in user's own rows.
+async function fetchAttemptedJoinKeys(supabase: SupabaseBrowserClient): Promise<Set<string>> {
+  const attempted = new Set<string>();
+
+  for (let from = 0; ; from += QUERY_PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('attempts')
+      .select('join_key')
+      .range(from, from + QUERY_PAGE_SIZE - 1);
+
+    if (error) {
+      throw new Error(`Could not load your previous attempts: ${formatSupabaseError(error)}`);
+    }
+
+    const batch = data || [];
+    for (const row of batch) {
+      if (typeof row.join_key === 'string' && row.join_key.length > 0) {
+        attempted.add(row.join_key);
+      }
+    }
+
+    if (batch.length < QUERY_PAGE_SIZE) break;
+  }
+
+  return attempted;
 }
 
 export default function QuizSetupPage() {
@@ -30,13 +134,23 @@ export default function QuizSetupPage() {
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [availableSubtopics, setAvailableSubtopics] = useState<SubtopicTag[]>([]);
   const [selectedSubtopics, setSelectedSubtopics] = useState<SubtopicTag[]>([]);
+  const [searchInput, setSearchInput] = useState('');
   const [questionCount, setQuestionCount] = useState<number>(10);
   const [timerEnabled, setTimerEnabled] = useState<boolean>(true);
   const [excludeIncomplete, setExcludeIncomplete] = useState<boolean>(true);
-  
+  const [repeatMode, setRepeatMode] = useState<RepeatMode>('all');
+
   const [matchingCount, setMatchingCount] = useState<number>(0);
+  const [totalMatchingCount, setTotalMatchingCount] = useState<number>(0);
+  const [countLoading, setCountLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Seed the keyword search from ?q= (used by the sidebar search box).
+  useEffect(() => {
+    const query = new URLSearchParams(window.location.search).get('q');
+    if (query) setSearchInput(query);
+  }, []);
 
   // Fetch topics dynamically
   useEffect(() => {
@@ -89,28 +203,59 @@ export default function QuizSetupPage() {
     fetchSubtopics();
   }, [selectedTopics, supabase]);
 
-  // Live matching count (debounced slightly by effect)
+  // Live matching count, debounced for keyword typing.
   useEffect(() => {
-    async function fetchCount() {
-      let query = supabase
-        .from('questions')
-        .select('join_key', { count: 'exact', head: true })
-        .not('join_key', 'is', null)
-        .in('correct_answer', [...ANSWER_LETTERS]);
-      if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
-      if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
-      if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
-      const { count, error } = await query;
-      if (error) {
-        setErrorMessage(`Could not count matching questions: ${formatSupabaseError(error)}`);
-        setMatchingCount(0);
-        return;
+    let cancelled = false;
+
+    setCountLoading(true);
+    const timerId = window.setTimeout(async () => {
+      const filters: QuestionFilters = {
+        excludeIncomplete,
+        topics: selectedTopics,
+        subtopics: selectedSubtopics,
+        searchFilter: buildSearchOrFilter(searchInput),
+      };
+
+      try {
+        if (repeatMode === 'all') {
+          const { count, error } = await buildJoinKeyQuery(supabase, filters, { countOnly: true });
+          if (error) {
+            throw new Error(`Could not count matching questions: ${formatSupabaseError(error)}`);
+          }
+          if (!cancelled) {
+            setMatchingCount(count || 0);
+            setTotalMatchingCount(count || 0);
+          }
+        } else {
+          const [matchingJoinKeys, attemptedJoinKeys] = await Promise.all([
+            fetchMatchingJoinKeys(supabase, filters),
+            fetchAttemptedJoinKeys(supabase),
+          ]);
+          const unseen = matchingJoinKeys.filter((joinKey) => !attemptedJoinKeys.has(joinKey));
+          if (!cancelled) {
+            setMatchingCount(unseen.length);
+            setTotalMatchingCount(matchingJoinKeys.length);
+          }
+        }
+        if (!cancelled) {
+          setErrorMessage(null);
+          setCountLoading(false);
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setErrorMessage(error instanceof Error ? error.message : 'Could not count questions.');
+          setMatchingCount(0);
+          setTotalMatchingCount(0);
+          setCountLoading(false);
+        }
       }
-      setErrorMessage(null);
-      setMatchingCount(count || 0);
-    }
-    fetchCount();
-  }, [excludeIncomplete, selectedTopics, selectedSubtopics, supabase]);
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [excludeIncomplete, selectedTopics, selectedSubtopics, searchInput, repeatMode, supabase]);
 
   const handleStart = async () => {
     if (matchingCount === 0) return;
@@ -124,23 +269,25 @@ export default function QuizSetupPage() {
       }
 
       // 1. Fetch and validate questions before creating a session.
-      let query = supabase
-        .from('questions')
-        .select('join_key')
-        .not('join_key', 'is', null)
-        .in('correct_answer', [...ANSWER_LETTERS]);
-      if (excludeIncomplete) query = query.or('is_incomplete.is.null,is_incomplete.eq.false');
-      if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
-      if (selectedSubtopics.length > 0) query = query.in('subtopic', selectedSubtopics);
+      const filters: QuestionFilters = {
+        excludeIncomplete,
+        topics: selectedTopics,
+        subtopics: selectedSubtopics,
+        searchFilter: buildSearchOrFilter(searchInput),
+      };
 
-      const { data: qs, error: questionsError } = await query;
-      if (questionsError) {
-        throw new Error(`Could not load questions: ${formatSupabaseError(questionsError)}`);
+      let availableJoinKeys = await fetchMatchingJoinKeys(supabase, filters);
+
+      if (repeatMode === 'unseen') {
+        const attemptedJoinKeys = await fetchAttemptedJoinKeys(supabase);
+        availableJoinKeys = availableJoinKeys.filter((joinKey) => !attemptedJoinKeys.has(joinKey));
+
+        if (availableJoinKeys.length === 0) {
+          throw new Error(
+            'You have already answered every question matching these filters. Switch "Question Pool" to "Allow Repeats" to practice them again.'
+          );
+        }
       }
-
-      const availableJoinKeys = (qs || [])
-        .map((q) => q.join_key)
-        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
 
       const shuffled = [...availableJoinKeys].sort(() => 0.5 - Math.random());
       const questionJoinKeys = questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
@@ -189,6 +336,25 @@ export default function QuizSetupPage() {
         </div>
 
         <div className="space-y-6 rounded-[var(--radius-card)] bg-[var(--color-card)] p-6">
+          {/* Keyword Search */}
+          <div className="space-y-2">
+            <label htmlFor="keyword-search" className="text-sm font-semibold text-white">
+              Keyword Search
+            </label>
+            <input
+              id="keyword-search"
+              type="text"
+              value={searchInput}
+              onChange={(event) => setSearchInput(event.target.value)}
+              placeholder="e.g. tuberculosis, thyroid, proteinuria — separate terms with commas"
+              className="w-full rounded-[var(--radius-button)] bg-[var(--color-surface)] px-4 py-3 text-sm text-white placeholder-[var(--color-muted)] outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <p className="text-xs text-[var(--color-muted)]">
+              Matches the question text and answer options. Combine with topics below to narrow
+              further.
+            </p>
+          </div>
+
           {/* Topic Filter */}
           <div className="space-y-2">
             <label className="text-sm font-semibold text-white">Topics</label>
@@ -263,6 +429,21 @@ export default function QuizSetupPage() {
                 onChange={(v) => setExcludeIncomplete(v as boolean)}
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-semibold text-white">Question Pool</label>
+              <PillToggle
+                options={[
+                  { id: 'all', label: 'Allow Repeats' },
+                  { id: 'unseen', label: 'New Questions Only' },
+                ]}
+                selected={repeatMode}
+                onChange={(v) => setRepeatMode(v as RepeatMode)}
+              />
+              <p className="max-w-md text-xs text-[var(--color-muted)]">
+                &quot;New Questions Only&quot; skips every question you have answered before, so a
+                20-question quiz never repeats until you have worked through the whole pool.
+              </p>
+            </div>
           </div>
         </div>
 
@@ -272,13 +453,30 @@ export default function QuizSetupPage() {
           </div>
         )}
 
-        <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-[var(--color-surface)] p-6">
+        <div className="flex items-center justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--color-surface)] p-6">
           <div className="text-lg">
-            Matching Questions: <span className="font-bold text-white">{matchingCount}</span>
+            {repeatMode === 'unseen' ? (
+              <>
+                Unseen Questions:{' '}
+                <span className="font-bold text-white">
+                  {countLoading ? '…' : matchingCount}
+                </span>{' '}
+                <span className="text-sm text-[var(--color-muted)]">
+                  of {countLoading ? '…' : totalMatchingCount} matching
+                </span>
+              </>
+            ) : (
+              <>
+                Matching Questions:{' '}
+                <span className="font-bold text-white">
+                  {countLoading ? '…' : matchingCount}
+                </span>
+              </>
+            )}
           </div>
           <button
             onClick={handleStart}
-            disabled={loading || matchingCount === 0}
+            disabled={loading || countLoading || matchingCount === 0}
             className="rounded-[var(--radius-button)] bg-blue-600 px-8 py-3 font-bold text-white transition-colors hover:bg-blue-700 disabled:opacity-50"
           >
             {loading ? 'Starting...' : 'Start Quiz'}

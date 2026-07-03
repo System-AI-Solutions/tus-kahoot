@@ -15,6 +15,9 @@ export interface AnswerRecord {
   userAnswer: string | null;
   isCorrect: boolean;
   timeTakenMs: number;
+  // Optional so quiz state persisted before these fields existed still loads.
+  sourceFile?: string | null;
+  correctAnswer?: string | null;
 }
 
 interface QuizState {
