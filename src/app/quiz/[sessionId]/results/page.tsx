@@ -1,22 +1,16 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useParams } from 'next/navigation';
-import {
-  readPersistedQuizState,
-  useQuizStore,
-  type AnswerRecord,
-} from '@/lib/stores/quiz-store';
+import { readPersistedQuizState, useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { AccuracyRing } from '@/components/ui/AccuracyRing';
+import { openQuizPdf, type PdfQuestion } from '@/lib/quiz/exam-pdf';
+import { formatExamSource } from '@/lib/utils';
 import Link from 'next/link';
 
-type PersistableAnswerRecord = AnswerRecord & { questionNumber: number };
-
-function hasPersistableQuestionNumber(answer: AnswerRecord): answer is PersistableAnswerRecord {
-  return typeof answer.questionNumber === 'number' && Number.isInteger(answer.questionNumber);
-}
+type SaveState = 'saving' | 'saved' | 'error';
 
 export default function ResultsPage() {
   const params = useParams<{ sessionId: string }>();
@@ -26,10 +20,14 @@ export default function ResultsPage() {
   const answers = useQuizStore((state) => state.answers);
   const score = useQuizStore((state) => state.score);
   const maxStreak = useQuizStore((state) => state.maxStreak);
-  const hasSaved = useRef(false);
-  const [loading, setLoading] = useState(true);
+  const saveInFlight = useRef(false);
+  const [saveState, setSaveState] = useState<SaveState>('saving');
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveAttempt, setSaveAttempt] = useState(0);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const [hydrationTimedOut, setHydrationTimedOut] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const totalQuestions = answers.length;
   const correctCount = answers.filter((a) => a.isCorrect).length;
@@ -60,8 +58,7 @@ export default function ResultsPage() {
     if (!config || config.sessionId !== sessionId || answers.length === 0) {
       queueMicrotask(() => {
         if (!cancelled) {
-          setSaveError('Could not restore quiz results. Please start a new quiz.');
-          setLoading(false);
+          setRestoreError('Could not restore quiz results. Please start a new quiz.');
         }
       });
       return () => {
@@ -70,9 +67,19 @@ export default function ResultsPage() {
     }
 
     async function saveResults() {
-      if (hasSaved.current) return;
-      hasSaved.current = true;
+      if (saveInFlight.current) return;
+      saveInFlight.current = true;
+      setSaveState('saving');
       setSaveError(null);
+
+      const finishWithError = (message: string, log?: unknown) => {
+        if (log) console.error(log);
+        saveInFlight.current = false;
+        if (!cancelled) {
+          setSaveError(message);
+          setSaveState('error');
+        }
+      };
 
       const supabase = createClient();
       const {
@@ -81,39 +88,74 @@ export default function ResultsPage() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        if (!cancelled) {
-          setSaveError(userError?.message || 'You must be logged in to save results.');
-          setLoading(false);
-        }
+        finishWithError(userError?.message || 'You must be logged in to save results.');
         return;
       }
 
-      if (!answers.every(hasPersistableQuestionNumber)) {
-        console.error('Could not save attempts: missing question number.', { sessionId, answers });
-        if (!cancelled) {
-          setSaveError('Could not save attempts: missing question number.');
-          setLoading(false);
-        }
+      const answerJoinKeys = Array.from(new Set(answers.map((answer) => answer.joinKey)));
+      if (answerJoinKeys.some((joinKey) => typeof joinKey !== 'string' || joinKey.length === 0)) {
+        finishWithError('Could not save attempts: missing question identifier.', {
+          sessionId,
+          answers,
+        });
         return;
       }
 
-      const attemptsToInsert = answers.map((answer) => ({
+      const { data: questionNumberRows, error: questionNumbersError } = await supabase
+        .from('questions')
+        .select('join_key, question_number')
+        .in('join_key', answerJoinKeys);
+
+      if (questionNumbersError || !questionNumberRows) {
+        finishWithError(
+          `Could not resolve question numbers: ${
+            questionNumbersError?.message || 'No question data returned'
+          }`,
+          questionNumbersError
+        );
+        return;
+      }
+
+      const questionNumberByJoinKey = new Map(
+        questionNumberRows.map((question) => [question.join_key, question.question_number])
+      );
+      const unresolvedJoinKeys = answerJoinKeys.filter(
+        (joinKey) => typeof questionNumberByJoinKey.get(joinKey) !== 'number'
+      );
+
+      if (unresolvedJoinKeys.length > 0) {
+        finishWithError(
+          'Could not save attempts: missing question number for one or more questions.',
+          { sessionId, unresolvedJoinKeys }
+        );
+        return;
+      }
+
+      const attemptsToUpsert = answers.map((answer) => ({
         user_id: user.id,
         session_id: sessionId,
         join_key: answer.joinKey,
-        question_number: answer.questionNumber,
+        question_number: questionNumberByJoinKey.get(answer.joinKey) as number,
         user_answer: answer.userAnswer,
         is_correct: answer.isCorrect,
         time_taken_ms: answer.timeTakenMs,
       }));
 
-      const { error: attemptsError } = await supabase.from('attempts').insert(attemptsToInsert);
+      // Upsert so re-saving the same session (retry, page refresh) is a no-op
+      // instead of a duplicate-key error.
+      const { error: attemptsError } = await supabase
+        .from('attempts')
+        .upsert(attemptsToUpsert, { onConflict: 'session_id,join_key', ignoreDuplicates: true });
       if (attemptsError) {
-        console.error(attemptsError);
-        if (!cancelled) {
-          setSaveError(`Could not save attempts: ${attemptsError.message}`);
-          setLoading(false);
-        }
+        const needsMigration =
+          attemptsError.message.includes('ON CONFLICT') ||
+          attemptsError.message.includes('attempts_join_key_key');
+        finishWithError(
+          needsMigration
+            ? `Could not save attempts: ${attemptsError.message}. The database migration "20260703000000_allow_repeat_attempts.sql" has not been applied yet.`
+            : `Could not save attempts: ${attemptsError.message}`,
+          attemptsError
+        );
         return;
       }
 
@@ -127,16 +169,12 @@ export default function ResultsPage() {
         .eq('id', sessionId);
 
       if (sessionError) {
-        console.error(sessionError);
-        if (!cancelled) {
-          setSaveError(`Could not update session: ${sessionError.message}`);
-          setLoading(false);
-        }
+        finishWithError(`Could not update session: ${sessionError.message}`, sessionError);
         return;
       }
 
       if (!cancelled) {
-        setLoading(false);
+        setSaveState('saved');
       }
     }
 
@@ -145,27 +183,65 @@ export default function ResultsPage() {
     return () => {
       cancelled = true;
     };
-  }, [hasHydrated, hydrationTimedOut, sessionId, config, answers, score, maxStreak]);
+  }, [hasHydrated, hydrationTimedOut, sessionId, config, answers, score, maxStreak, saveAttempt]);
 
-  if (loading) {
-    return (
-      <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
-        <Header />
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-xl font-bold text-white animate-pulse">Saving results...</div>
-        </div>
-      </div>
-    );
-  }
+  const handleRetrySave = useCallback(() => {
+    setSaveAttempt((attempt) => attempt + 1);
+  }, []);
 
-  if (saveError) {
+  const handleDownloadPdf = useCallback(async () => {
+    setPdfLoading(true);
+    setPdfError(null);
+
+    try {
+      const joinKeys = answers.map((answer) => answer.joinKey);
+      const supabase = createClient();
+      const { data, error } = await supabase
+        .from('questions')
+        .select(
+          'join_key, question_number, question_text, option_a, option_b, option_c, option_d, option_e, correct_answer, source_file, topic'
+        )
+        .in('join_key', joinKeys);
+
+      if (error || !data) {
+        throw new Error(error?.message || 'Could not load questions for the PDF.');
+      }
+
+      const questionByJoinKey = new Map(data.map((question) => [question.join_key, question]));
+      const orderedQuestions: PdfQuestion[] = joinKeys
+        .map((joinKey) => questionByJoinKey.get(joinKey))
+        .filter((question): question is NonNullable<typeof question> => Boolean(question));
+
+      if (orderedQuestions.length === 0) {
+        throw new Error('No question data available for this quiz.');
+      }
+
+      const answersByJoinKey = new Map(answers.map((answer) => [answer.joinKey, answer]));
+      const opened = openQuizPdf({
+        title: `MedBank Quiz — ${new Date().toLocaleDateString('en-GB')}`,
+        questions: orderedQuestions,
+        answersByJoinKey,
+      });
+
+      if (!opened) {
+        throw new Error('The print window was blocked. Please allow pop-ups for this site.');
+      }
+    } catch (error) {
+      console.error(error);
+      setPdfError(error instanceof Error ? error.message : 'Could not generate the PDF.');
+    } finally {
+      setPdfLoading(false);
+    }
+  }, [answers]);
+
+  if (restoreError) {
     return (
       <div className="min-h-screen bg-[var(--color-bg)]">
         <Header />
         <main className="mx-auto flex min-h-[70vh] max-w-xl flex-col items-center justify-center px-6 text-center">
           <div className="rounded-[var(--radius-card)] border border-red-500/40 bg-red-500/10 p-8">
             <h1 className="text-2xl font-bold text-white">Results Could Not Load</h1>
-            <p className="mt-3 text-sm text-red-100">{saveError}</p>
+            <p className="mt-3 text-sm text-red-100">{restoreError}</p>
             <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row">
               <Link
                 href="/quiz/setup"
@@ -186,10 +262,44 @@ export default function ResultsPage() {
     );
   }
 
+  if (!config && !hydrationTimedOut) {
+    return (
+      <div className="flex min-h-screen flex-col bg-[var(--color-bg)]">
+        <Header />
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-xl font-bold text-white animate-pulse">Loading results...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-[var(--color-bg)] pb-12">
       <Header />
       <main className="mx-auto mt-8 max-w-4xl px-4">
+        {saveState === 'saving' && (
+          <div className="mb-4 rounded-[var(--radius-card)] border border-blue-500/40 bg-blue-500/10 p-4 text-sm text-blue-100">
+            Saving results...
+          </div>
+        )}
+        {saveState === 'error' && (
+          <div className="mb-4 rounded-[var(--radius-card)] border border-red-500/40 bg-red-500/10 p-4">
+            <p className="text-sm text-red-100">
+              <span className="font-bold">Your results could not be saved:</span> {saveError}
+            </p>
+            <p className="mt-1 text-xs text-red-200/80">
+              Your score below is still correct, but this quiz won&apos;t appear in your stats or
+              review page until saving succeeds. You can still download the PDF.
+            </p>
+            <button
+              onClick={handleRetrySave}
+              className="mt-3 rounded-[var(--radius-button)] bg-white px-4 py-2 text-sm font-bold text-black transition-colors hover:bg-neutral-200"
+            >
+              Retry Save
+            </button>
+          </div>
+        )}
+
         <div className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-8 text-center shadow-xl">
           <h1 className="text-3xl font-bold text-white">Quiz Completed!</h1>
 
@@ -206,11 +316,18 @@ export default function ResultsPage() {
 
             <div className="flex flex-col items-center">
               <span className="text-sm font-medium text-[var(--color-muted)]">Max Streak</span>
-              <span className="mt-2 text-4xl font-bold text-orange-500">ðŸ”¥ {maxStreak}</span>
+              <span className="mt-2 text-4xl font-bold text-orange-500">🔥 {maxStreak}</span>
             </div>
           </div>
 
-          <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row">
+          <div className="mt-12 flex flex-col items-center justify-center gap-4 sm:flex-row sm:flex-wrap">
+            <button
+              onClick={handleDownloadPdf}
+              disabled={pdfLoading}
+              className="rounded-[var(--radius-button)] bg-white px-6 py-3 font-bold text-black transition-colors hover:bg-neutral-200 disabled:opacity-50"
+            >
+              {pdfLoading ? 'Preparing PDF...' : 'Download PDF'}
+            </button>
             <Link
               href="/review"
               className="rounded-[var(--radius-button)] bg-[var(--color-surface)] px-6 py-3 font-medium text-white transition-colors hover:bg-white hover:text-black"
@@ -230,6 +347,7 @@ export default function ResultsPage() {
               Back to Dashboard
             </Link>
           </div>
+          {pdfError && <p className="mt-4 text-sm text-red-300">{pdfError}</p>}
         </div>
 
         <div className="mt-8 rounded-[var(--radius-card)] bg-[var(--color-surface)] p-6">
@@ -239,6 +357,9 @@ export default function ResultsPage() {
               <thead className="bg-[#111] uppercase text-[var(--color-muted)]">
                 <tr>
                   <th className="px-4 py-3">#</th>
+                  <th className="px-4 py-3">Source</th>
+                  <th className="px-4 py-3">Your Answer</th>
+                  <th className="px-4 py-3">Correct</th>
                   <th className="px-4 py-3">Result</th>
                   <th className="px-4 py-3">Time</th>
                 </tr>
@@ -248,13 +369,18 @@ export default function ResultsPage() {
                   <tr key={index} className="border-b border-[#222]">
                     <td className="px-4 py-3 text-white">Q{index + 1}</td>
                     <td className="px-4 py-3">
+                      {formatExamSource(answer.sourceFile, answer.questionNumber) || '—'}
+                    </td>
+                    <td className="px-4 py-3">{answer.userAnswer ?? '—'}</td>
+                    <td className="px-4 py-3">{answer.correctAnswer ?? '—'}</td>
+                    <td className="px-4 py-3">
                       {answer.isCorrect ? (
                         <span className="font-bold text-[var(--color-correct-banner)]">
-                          âœ“ Correct
+                          ✓ Correct
                         </span>
                       ) : (
                         <span className="font-bold text-[var(--color-wrong-banner)]">
-                          âœ— Wrong
+                          ✗ Wrong
                         </span>
                       )}
                     </td>

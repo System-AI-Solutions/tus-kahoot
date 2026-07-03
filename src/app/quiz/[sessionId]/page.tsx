@@ -7,13 +7,38 @@ import { readPersistedQuizState, useQuizStore } from '@/lib/stores/quiz-store';
 import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { QuizPlayer } from '@/components/quiz/QuizPlayer';
-import { isAnswerLetter } from '@/lib/constants';
+import { isAnswerLetter, type AnswerLetter } from '@/lib/constants';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 
-function hasSelectedAnswerOption(question: QuestionRow) {
+type PlayableQuestionRow = Omit<
+  QuestionRow,
+  'question_text' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'correct_answer'
+> & {
+  question_text: string;
+  option_a: string;
+  option_b: string;
+  option_c: string;
+  option_d: string;
+  correct_answer: AnswerLetter;
+};
+
+function hasText(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+function hasSelectedAnswerOption(question: QuestionRow): question is PlayableQuestionRow {
   if (!isAnswerLetter(question.correct_answer)) return false;
+  if (
+    !hasText(question.question_text) ||
+    !hasText(question.option_a) ||
+    !hasText(question.option_b) ||
+    !hasText(question.option_c) ||
+    !hasText(question.option_d)
+  ) {
+    return false;
+  }
 
   let answerText: string | null;
 
@@ -35,7 +60,7 @@ function hasSelectedAnswerOption(question: QuestionRow) {
       break;
   }
 
-  return typeof answerText === 'string' && answerText.trim().length > 0;
+  return hasText(answerText);
 }
 
 export default function QuizPage() {
@@ -44,7 +69,7 @@ export default function QuizPage() {
   const hasHydrated = useQuizStore((state) => state.hasHydrated);
   const config = useQuizStore((state) => state.config);
   const questionJoinKeys = useQuizStore((state) => state.questionJoinKeys);
-  const [questions, setQuestions] = useState<QuestionRow[]>([]);
+  const [questions, setQuestions] = useState<PlayableQuestionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hydrationTimedOut, setHydrationTimedOut] = useState(false);

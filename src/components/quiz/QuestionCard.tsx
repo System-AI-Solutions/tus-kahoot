@@ -8,9 +8,10 @@ interface QuestionCardProps {
   questionNumber: number;
   totalQuestions: number;
   questionText: string;
+  examSource?: string;
 }
 
-export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText }: QuestionCardProps) {
+export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText, examSource }: QuestionCardProps) {
   const [bookmarked, setBookmarked] = React.useState(false);
   const supabase = React.useMemo(() => createClient(), []);
 
@@ -54,9 +55,16 @@ export function QuestionCard({ joinKey, questionNumber, totalQuestions, question
   return (
     <div className="mx-auto max-w-2xl rounded-[var(--radius-card)] bg-white p-6 shadow-xl relative">
       <div className="mb-4 flex items-center justify-between">
-        <span className="rounded-[var(--radius-chip)] bg-[var(--color-surface)] px-3 py-1 text-xs font-bold text-white">
-          Question {questionNumber} of {totalQuestions}
-        </span>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-[var(--radius-chip)] bg-[var(--color-surface)] px-3 py-1 text-xs font-bold text-white">
+            Question {questionNumber} of {totalQuestions}
+          </span>
+          {examSource && (
+            <span className="rounded-[var(--radius-chip)] bg-blue-600/15 px-3 py-1 text-xs font-bold text-blue-700">
+              {examSource}
+            </span>
+          )}
+        </div>
         <button
           onClick={toggleBookmark}
           className="text-[var(--color-muted)] hover:text-black transition-colors"

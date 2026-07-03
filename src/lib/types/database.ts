@@ -11,8 +11,8 @@ export interface Database {
     Tables: {
       questions: {
         Row: {
-          question: number
-          question_text: string
+          question_number: number
+          question_text: string | null
           topic: string | null
           subtopic:
             | 'anatomy'
@@ -41,21 +41,23 @@ export interface Database {
             | 'urology'
             | 'other'
             | null
-          option_a: string
-          option_b: string
-          option_c: string
-          option_d: string
+          option_a: string | null
+          option_b: string | null
+          option_c: string | null
+          option_d: string | null
           option_e: string | null
-          correct_answer: 'A' | 'B' | 'C' | 'D' | 'E'
+          correct_answer: 'A' | 'B' | 'C' | 'D' | 'E' | null
           is_incomplete: boolean | null
-          source_page_hint: string | null
+          source_page_hint: number | null
           source_file: string | null
           source_file_id: string | null
           join_key: string
+          timestamp: string
+          answer_parse_status: string | null
         }
         Insert: {
-          question: number
-          question_text: string
+          question_number: number
+          question_text?: string | null
           topic?: string | null
           subtopic?:
             | 'anatomy'
@@ -84,17 +86,19 @@ export interface Database {
             | 'urology'
             | 'other'
             | null
-          option_a: string
-          option_b: string
-          option_c: string
-          option_d: string
+          option_a?: string | null
+          option_b?: string | null
+          option_c?: string | null
+          option_d?: string | null
           option_e?: string | null
-          correct_answer: 'A' | 'B' | 'C' | 'D' | 'E'
+          correct_answer?: 'A' | 'B' | 'C' | 'D' | 'E' | null
           is_incomplete?: boolean | null
-          source_page_hint?: string | null
+          source_page_hint?: number | null
           source_file?: string | null
           source_file_id?: string | null
           join_key: string
+          timestamp?: string
+          answer_parse_status?: string | null
         }
         Update: Partial<Database['public']['Tables']['questions']['Insert']>
         Relationships: []

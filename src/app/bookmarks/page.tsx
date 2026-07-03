@@ -1,19 +1,31 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
-import { formatTopic } from '@/lib/utils';
+import { formatTopic, formatExamSource } from '@/lib/utils';
 import type { Database } from '@/lib/types/database';
 import Link from 'next/link';
+import { isAnswerLetter } from '@/lib/constants';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
 type BookmarkQuestion = Pick<
   QuestionRow,
-  'join_key' | 'topic' | 'question_text' | 'correct_answer' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e'
+  'join_key' | 'topic' | 'question_text' | 'correct_answer' | 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e' | 'question_number' | 'source_file'
 >;
 type BookmarkRow = {
   id: string;
   questions: BookmarkQuestion | null;
 };
 type AnswerOptionKey = 'option_a' | 'option_b' | 'option_c' | 'option_d' | 'option_e';
+
+function getCorrectAnswerText(question: BookmarkQuestion) {
+  if (!isAnswerLetter(question.correct_answer)) return null;
+
+  const answerKey = `option_${question.correct_answer.toLowerCase()}` as AnswerOptionKey;
+  const answerText = question[answerKey];
+
+  if (typeof answerText !== 'string' || answerText.trim().length === 0) return null;
+
+  return `${question.correct_answer}: ${answerText}`;
+}
 
 export default async function BookmarksPage() {
   const supabase = await createClient();
@@ -34,7 +46,9 @@ export default async function BookmarksPage() {
         option_b,
         option_c,
         option_d,
-        option_e
+        option_e,
+        question_number,
+        source_file
       )
     `)
     .order('created_at', { ascending: false });
@@ -59,13 +73,21 @@ export default async function BookmarksPage() {
             {bookmarks.map((b) => {
               const q = b.questions;
               if (!q) return null;
-              const answerKey = `option_${q.correct_answer.toLowerCase()}` as AnswerOptionKey;
+              const correctAnswerText = getCorrectAnswerText(q);
+              const examSource = formatExamSource(q.source_file, q.question_number);
               return (
                 <div key={b.id} className="flex flex-col justify-between rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-lg">
                   <div>
-                    <span className="mb-3 inline-block rounded-[var(--radius-chip)] bg-[var(--color-surface)] px-3 py-1 text-xs font-bold text-white">
-                      {formatTopic(q.topic)}
-                    </span>
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      <span className="inline-block rounded-[var(--radius-chip)] bg-[var(--color-surface)] px-3 py-1 text-xs font-bold text-white">
+                        {formatTopic(q.topic)}
+                      </span>
+                      {examSource && (
+                        <span className="inline-block rounded-[var(--radius-chip)] bg-blue-600/20 px-3 py-1 text-xs font-bold text-blue-200">
+                          {examSource}
+                        </span>
+                      )}
+                    </div>
                     <p className="line-clamp-3 text-sm font-medium text-white mb-4">
                       {q.question_text}
                     </p>
@@ -73,7 +95,7 @@ export default async function BookmarksPage() {
                   <div className="rounded bg-[var(--color-surface)] p-3">
                     <div className="text-xs font-bold text-[var(--color-muted)]">Correct Answer</div>
                     <div className="text-sm font-bold text-[var(--color-correct-banner)]">
-                      {q.correct_answer}: {q[answerKey]}
+                      {correctAnswerText ?? 'Unavailable'}
                     </div>
                   </div>
                 </div>

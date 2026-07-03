@@ -8,11 +8,10 @@ import { QuestionCard } from './QuestionCard';
 import { AnswerGrid } from './AnswerGrid';
 import { FeedbackBanner } from './FeedbackBanner';
 import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
-import { calculateScore } from '@/lib/utils';
+import { calculateScore, formatExamSource } from '@/lib/utils';
 
 interface QuestionData {
-  question?: number | null;
-  question_number?: number | null;
+  question_number: number;
   join_key: string;
   question_text: string;
   option_a: string;
@@ -21,6 +20,7 @@ interface QuestionData {
   option_d: string;
   option_e: string | null;
   correct_answer: AnswerLetter;
+  source_file: string | null;
 }
 
 interface AnswerOption {
@@ -29,7 +29,7 @@ interface AnswerOption {
 }
 
 function getSourceQuestionNumber(question: QuestionData) {
-  return question.question_number ?? question.question ?? null;
+  return question.question_number;
 }
 
 export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
@@ -91,6 +91,8 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
         userAnswer: letter,
         isCorrect,
         timeTakenMs: TIMER_DURATION_MS - timeRemainingMs,
+        sourceFile: activeQuestion.source_file,
+        correctAnswer: activeQuestion.correct_answer,
       }, points);
 
     }, 1000); // 1s pretend-checking delay
@@ -192,11 +194,12 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
       />
 
       <main className="flex flex-1 flex-col justify-center px-4 py-8">
-        <QuestionCard 
+        <QuestionCard
           joinKey={activeQuestion.join_key}
           questionNumber={currentIndex + 1}
           totalQuestions={questions.length}
           questionText={activeQuestion.question_text}
+          examSource={formatExamSource(activeQuestion.source_file, activeQuestion.question_number)}
         />
         
         <div className="mx-auto mt-12 w-full max-w-4xl px-4">
