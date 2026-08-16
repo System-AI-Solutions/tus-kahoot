@@ -13,6 +13,7 @@ export interface PdfQuestion {
   correct_answer: string | null;
   source_file: string | null;
   topic: string | null;
+  explanation?: string | null;
 }
 
 function escapeHtml(value: string): string {
@@ -70,6 +71,8 @@ function renderQuestion(
       : `Skipped (correct: ${escapeHtml(question.correct_answer ?? '?')})`
     : '';
 
+  const explanation = question.explanation?.trim();
+
   return `
     <article class="question">
       <header>
@@ -79,6 +82,11 @@ function renderQuestion(
       <p class="stem">${escapeHtml(question.question_text ?? 'Question text unavailable')}</p>
       <ol class="options">${options}</ol>
       ${verdict ? `<p class="verdict ${answer?.isCorrect ? 'ok' : 'bad'}">${verdict}</p>` : ''}
+      ${
+        explanation
+          ? `<div class="explanation"><span class="explanation-label">Explanation</span>${escapeHtml(explanation)}</div>`
+          : ''
+      }
     </article>`;
 }
 
@@ -136,6 +144,8 @@ export function openQuizPdf({
   .verdict { font-size: 12px; margin: 6px 0 0 16px; }
   .verdict.ok { color: #14652d; }
   .verdict.bad { color: #a31212; }
+  .explanation { font-size: 12px; margin: 6px 0 0 16px; padding-left: 10px; border-left: 3px solid #bbb; white-space: pre-wrap; color: #222; }
+  .explanation-label { display: block; font-size: 10px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; color: #555; margin-bottom: 2px; }
   .answer-key { margin-top: 32px; page-break-before: always; }
   .answer-key table { border-collapse: collapse; width: 100%; font-size: 13px; }
   .answer-key th, .answer-key td { border: 1px solid #999; padding: 4px 8px; text-align: left; }

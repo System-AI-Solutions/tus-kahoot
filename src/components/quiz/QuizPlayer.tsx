@@ -7,8 +7,11 @@ import { QuizTopBar } from './QuizTopBar';
 import { QuestionCard } from './QuestionCard';
 import { AnswerGrid } from './AnswerGrid';
 import { FeedbackBanner } from './FeedbackBanner';
+import { ExplanationPanel } from './ExplanationPanel';
 import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
-import { calculateScore, formatExamSource } from '@/lib/utils';
+import { calculateScore } from '@/lib/utils';
+import { formatExamProvenance } from '@/lib/exam-source';
+import type { QuestionExplanation } from '@/lib/explanations';
 
 interface QuestionData {
   question_number: number;
@@ -32,7 +35,13 @@ function getSourceQuestionNumber(question: QuestionData) {
   return question.question_number;
 }
 
-export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
+export function QuizPlayer({
+  questions,
+  explanations,
+}: {
+  questions: QuestionData[];
+  explanations?: Map<string, QuestionExplanation>;
+}) {
   const router = useRouter();
   const store = useQuizStore();
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -45,6 +54,9 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   const [feedbackStatus, setFeedbackStatus] = useState<'correct' | 'wrong' | 'timeout' | null>(null);
 
   const activeQuestion = questions[currentIndex];
+  const activeExplanation = activeQuestion
+    ? explanations?.get(activeQuestion.join_key) ?? null
+    : null;
 
   // Map options
   const options = React.useMemo(() => {
@@ -136,6 +148,18 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
   // Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      // Typing in the explanation editor must never answer or advance.
+      if (
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
+      ) {
+        return;
+      }
+      // A focused button already handles Space and Enter itself, so skipping
+      // and advancing stay mouse or body-focus actions there.
+      const targetIsButton = target?.tagName === 'BUTTON';
+
       if (status === 'default') {
         const letter = e.key.toUpperCase();
         if (['A', 'B', 'C', 'D', 'E'].includes(letter)) {
@@ -144,10 +168,14 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
             handleAnswer(letter);
           }
         }
-        if (e.code === 'Space') {
+        if (e.code === 'Space' && !targetIsButton) {
           handleAnswer(null); // Skip
         }
-      } else if (status === 'revealed' && (e.code === 'Enter' || e.code === 'Space')) {
+      } else if (
+        status === 'revealed' &&
+        (e.code === 'Enter' || e.code === 'Space') &&
+        !targetIsButton
+      ) {
         nextQuestion();
       }
     };
@@ -199,11 +227,16 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
           questionNumber={currentIndex + 1}
           totalQuestions={questions.length}
           questionText={activeQuestion.question_text}
-          examSource={formatExamSource(activeQuestion.source_file, activeQuestion.question_number)}
+          examSource={formatExamProvenance(
+            activeQuestion.source_file,
+            activeQuestion.question_number
+          )}
+          sourceFile={activeQuestion.source_file}
+          attendingTip={activeExplanation?.attending_tip ?? null}
         />
-        
+
         <div className="mx-auto mt-12 w-full max-w-4xl px-4">
-          <AnswerGrid 
+          <AnswerGrid
             options={options}
             selectedLetter={selectedLetter}
             correctLetter={activeQuestion.correct_answer}
@@ -211,6 +244,18 @@ export function QuizPlayer({ questions }: { questions: QuestionData[] }) {
             onSelect={handleAnswer}
           />
         </div>
+
+        {status === 'revealed' && (
+          <ExplanationPanel
+            key={activeQuestion.join_key}
+            className="mx-auto mt-8 w-full max-w-4xl px-4"
+            joinKey={activeQuestion.join_key}
+            explanation={activeExplanation}
+            options={options}
+            correctLetter={activeQuestion.correct_answer}
+            selectedLetter={selectedLetter}
+          />
+        )}
 
         {status === 'revealed' && (
           <div className="mt-8 flex justify-center animate-in fade-in zoom-in">

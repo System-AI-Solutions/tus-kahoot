@@ -1,8 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
-import { formatTopic, formatExamSource, cn } from '@/lib/utils';
+import { ExplanationPanel } from '@/components/quiz/ExplanationPanel';
+import { QuestionFlagButton } from '@/components/quiz/QuestionFlagButton';
+import { formatTopic, cn } from '@/lib/utils';
+import { formatExamProvenance } from '@/lib/exam-source';
 import Link from 'next/link';
 import { ANSWER_COLORS, isAnswerLetter, type AnswerLetter } from '@/lib/constants';
+import { fetchExplanationsByJoinKey } from '@/lib/explanations';
+import { fetchFlagsByJoinKey } from '@/lib/source-integrity';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
@@ -72,6 +77,17 @@ export default async function ReviewPage() {
 
   const topics = Object.keys(grouped).sort();
 
+  const reviewJoinKeys = topics.flatMap((topic) =>
+    grouped[topic]
+      .map((attempt) => attempt.questions?.join_key)
+      .filter((joinKey): joinKey is string => typeof joinKey === 'string')
+  );
+
+  const [explanations, flags] = await Promise.all([
+    fetchExplanationsByJoinKey(supabase, reviewJoinKeys),
+    fetchFlagsByJoinKey(supabase, reviewJoinKeys),
+  ]);
+
   return (
     <div className="min-h-screen pb-12">
       <Header />
@@ -104,15 +120,30 @@ export default async function ReviewPage() {
                       toAnswerOption('E', q.option_e),
                     ].filter((option): option is AnswerOption => Boolean(option));
 
-                    const examSource = formatExamSource(q.source_file, q.question_number);
+                    const examSource = formatExamProvenance(q.source_file, q.question_number);
 
                     return (
                       <div key={a.id} className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-6 shadow-md">
-                        {examSource && (
-                          <span className="mb-3 inline-block rounded-[var(--radius-chip)] bg-blue-600/20 px-3 py-1 text-xs font-bold text-blue-200">
-                            {examSource}
-                          </span>
-                        )}
+                        <div className="mb-3 flex items-start justify-between gap-3">
+                          {examSource ? (
+                            <span
+                              title={
+                                q.source_file
+                                  ? `Source file: ${q.source_file}`
+                                  : 'No source file recorded'
+                              }
+                              className="inline-block rounded-[var(--radius-chip)] bg-blue-600/20 px-3 py-1 text-xs font-bold text-blue-200"
+                            >
+                              {examSource}
+                            </span>
+                          ) : (
+                            <span />
+                          )}
+                          <QuestionFlagButton
+                            joinKey={q.join_key}
+                            initialFlag={flags.get(q.join_key) ?? null}
+                          />
+                        </div>
                         <p className="mb-6 font-medium text-white">
                           {q.question_text || 'Question text unavailable'}
                         </p>
@@ -144,6 +175,15 @@ export default async function ReviewPage() {
                             );
                           })}
                         </div>
+
+                        <ExplanationPanel
+                          className="mt-6"
+                          joinKey={q.join_key}
+                          explanation={explanations.get(q.join_key) ?? null}
+                          options={options}
+                          correctLetter={correctAnswer}
+                          selectedLetter={a.user_answer}
+                        />
                       </div>
                     );
                   })}

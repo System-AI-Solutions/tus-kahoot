@@ -90,6 +90,23 @@ export function formatExamLabel(meta: ExamSourceMeta): string {
   return meta.raw || 'Unknown source';
 }
 
+// One-line provenance for a single question: the exam paper it claims to come
+// from plus the number it claims to hold in that paper. Pair it with the raw
+// source_file in a title attribute so a suspicious claim can be checked against
+// the original file.
+export function formatExamProvenance(
+  sourceFile: string | null | undefined,
+  questionNumber: number | null | undefined
+): string {
+  const label = formatExamLabel(parseExamSource(sourceFile));
+  const numberLabel =
+    typeof questionNumber === 'number' && Number.isFinite(questionNumber)
+      ? `#${questionNumber}`
+      : '';
+
+  return [label, numberLabel].filter(Boolean).join(' · ');
+}
+
 // Stable key so questions from the same exam paper group together even when
 // their source_file strings differ cosmetically.
 export function examGroupKey(meta: ExamSourceMeta): string {
