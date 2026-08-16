@@ -1,8 +1,10 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
+import { ExplanationPanel } from '@/components/quiz/ExplanationPanel';
 import { formatTopic, formatExamSource, cn } from '@/lib/utils';
 import Link from 'next/link';
 import { ANSWER_COLORS, isAnswerLetter, type AnswerLetter } from '@/lib/constants';
+import { fetchExplanationsByJoinKey } from '@/lib/explanations';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
@@ -71,6 +73,15 @@ export default async function ReviewPage() {
   }
 
   const topics = Object.keys(grouped).sort();
+
+  const explanations = await fetchExplanationsByJoinKey(
+    supabase,
+    topics.flatMap((topic) =>
+      grouped[topic]
+        .map((attempt) => attempt.questions?.join_key)
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string')
+    )
+  );
 
   return (
     <div className="min-h-screen pb-12">
@@ -144,6 +155,15 @@ export default async function ReviewPage() {
                             );
                           })}
                         </div>
+
+                        <ExplanationPanel
+                          className="mt-6"
+                          joinKey={q.join_key}
+                          explanation={explanations.get(q.join_key) ?? null}
+                          options={options}
+                          correctLetter={correctAnswer}
+                          selectedLetter={a.user_answer}
+                        />
                       </div>
                     );
                   })}

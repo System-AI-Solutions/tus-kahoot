@@ -1,6 +1,6 @@
 import React from 'react';
 import { BookmarkIcon as BookmarkSolid } from '@heroicons/react/24/solid';
-import { BookmarkIcon as BookmarkOutline } from '@heroicons/react/24/outline';
+import { BookmarkIcon as BookmarkOutline, LightBulbIcon } from '@heroicons/react/24/outline';
 import { createClient } from '@/lib/supabase/client';
 
 interface QuestionCardProps {
@@ -9,11 +9,19 @@ interface QuestionCardProps {
   totalQuestions: number;
   questionText: string;
   examSource?: string;
+  attendingTip?: string | null;
 }
 
-export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText, examSource }: QuestionCardProps) {
+export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText, examSource, attendingTip }: QuestionCardProps) {
   const [bookmarked, setBookmarked] = React.useState(false);
+  const [tipOpen, setTipOpen] = React.useState(false);
   const supabase = React.useMemo(() => createClient(), []);
+
+  // The card is reused across questions, so the hint collapses again whenever
+  // a new question arrives.
+  React.useEffect(() => {
+    setTipOpen(false);
+  }, [joinKey]);
 
   React.useEffect(() => {
     async function checkBookmark() {
@@ -79,6 +87,23 @@ export function QuestionCard({ joinKey, questionNumber, totalQuestions, question
       <h2 className="text-xl font-bold leading-relaxed text-black">
         {questionText}
       </h2>
+      {attendingTip && (
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={() => setTipOpen((open) => !open)}
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-bold uppercase tracking-wide text-amber-800 transition-colors hover:bg-amber-100"
+          >
+            <LightBulbIcon className="h-4 w-4" />
+            {tipOpen ? 'Hide Attending Tip' : 'Attending Tip'}
+          </button>
+          {tipOpen && (
+            <p className="mt-3 whitespace-pre-line rounded-[var(--radius-button)] border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900">
+              {attendingTip}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }

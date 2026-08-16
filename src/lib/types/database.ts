@@ -185,6 +185,46 @@ export interface Database {
           },
         ]
       }
+      question_explanations: {
+        Row: {
+          join_key: string
+          explanation: string | null
+          option_a_explanation: string | null
+          option_b_explanation: string | null
+          option_c_explanation: string | null
+          option_d_explanation: string | null
+          option_e_explanation: string | null
+          attending_tip: string | null
+          key_info: string | null
+          image_url: string | null
+          source_note: string | null
+          updated_at: string
+        }
+        Insert: {
+          join_key: string
+          explanation?: string | null
+          option_a_explanation?: string | null
+          option_b_explanation?: string | null
+          option_c_explanation?: string | null
+          option_d_explanation?: string | null
+          option_e_explanation?: string | null
+          attending_tip?: string | null
+          key_info?: string | null
+          image_url?: string | null
+          source_note?: string | null
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['question_explanations']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'question_explanations_join_key_fkey'
+            columns: ['join_key']
+            isOneToOne: true
+            referencedRelation: 'questions'
+            referencedColumns: ['join_key']
+          },
+        ]
+      }
       bookmarks: {
         Row: {
           id: string

@@ -8,6 +8,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { QuizPlayer } from '@/components/quiz/QuizPlayer';
 import { isAnswerLetter, type AnswerLetter } from '@/lib/constants';
+import { fetchExplanationsByJoinKey, type QuestionExplanation } from '@/lib/explanations';
 import type { Database } from '@/lib/types/database';
 
 type QuestionRow = Database['public']['Tables']['questions']['Row'];
@@ -70,6 +71,9 @@ export default function QuizPage() {
   const config = useQuizStore((state) => state.config);
   const questionJoinKeys = useQuizStore((state) => state.questionJoinKeys);
   const [questions, setQuestions] = useState<PlayableQuestionRow[]>([]);
+  const [explanations, setExplanations] = useState<Map<string, QuestionExplanation>>(
+    () => new Map()
+  );
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hydrationTimedOut, setHydrationTimedOut] = useState(false);
@@ -163,6 +167,14 @@ export default function QuizPage() {
 
       setQuestions(ordered);
       setLoading(false);
+
+      // Explanations are optional extras, so they load after the questions and
+      // never block or fail the quiz.
+      const explanationRows = await fetchExplanationsByJoinKey(
+        supabase,
+        ordered.map((question) => question.join_key)
+      );
+      if (!cancelled) setExplanations(explanationRows);
     }
 
     fetchQuestions();
@@ -208,5 +220,5 @@ export default function QuizPage() {
     );
   }
 
-  return <QuizPlayer questions={questions} />;
+  return <QuizPlayer questions={questions} explanations={explanations} />;
 }

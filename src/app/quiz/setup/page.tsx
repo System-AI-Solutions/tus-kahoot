@@ -8,6 +8,11 @@ import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
 import { ANSWER_LETTERS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
 import { formatTopic } from '@/lib/utils';
+import {
+  countExplanations,
+  fetchAllExplanations,
+  type QuestionExplanation,
+} from '@/lib/explanations';
 import type { Database } from '@/lib/types/database';
 import type { PdfQuestionRow } from '@/lib/pdf/question-pdf';
 
@@ -129,14 +134,16 @@ async function fetchAttemptedJoinKeys(supabase: SupabaseBrowserClient): Promise<
 }
 
 const PDF_COLUMNS =
-  'question_number, question_text, option_a, option_b, option_c, option_d, option_e, correct_answer, source_file';
+  'join_key, question_number, question_text, option_a, option_b, option_c, option_d, option_e, correct_answer, source_file';
 
 // Full question rows for the printable study paper. Only rows with a usable
 // stem and a valid answer letter are kept; nullable option columns collapse to
-// empty strings so the PDF renderer always receives clean strings.
+// empty strings so the PDF renderer always receives clean strings. Explanations
+// are attached by join_key when the export asks for them.
 async function fetchMatchingQuestionRows(
   supabase: SupabaseBrowserClient,
-  filters: QuestionFilters
+  filters: QuestionFilters,
+  explanations: Map<string, QuestionExplanation> | null
 ): Promise<PdfQuestionRow[]> {
   const rows: PdfQuestionRow[] = [];
 
@@ -170,6 +177,7 @@ async function fetchMatchingQuestionRows(
         option_e: row.option_e ?? null,
         correct_answer: row.correct_answer,
         source_file: row.source_file ?? null,
+        explanation: explanations?.get(row.join_key) ?? null,
       });
     }
 
@@ -192,6 +200,8 @@ export default function QuizSetupPage() {
   const [excludeIncomplete, setExcludeIncomplete] = useState<boolean>(true);
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('all');
   const [pdfAnswerKey, setPdfAnswerKey] = useState<boolean>(true);
+  const [pdfExplanations, setPdfExplanations] = useState<boolean>(true);
+  const [explanationCount, setExplanationCount] = useState<number>(0);
 
   const [matchingCount, setMatchingCount] = useState<number>(0);
   const [totalMatchingCount, setTotalMatchingCount] = useState<number>(0);
@@ -226,6 +236,22 @@ export default function QuizSetupPage() {
       }
     }
     fetchTopics();
+  }, [supabase]);
+
+  // Explanations are optional content, so the export toggle only appears once
+  // at least one question has one.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchExplanationCount() {
+      const count = await countExplanations(supabase);
+      if (!cancelled) setExplanationCount(count);
+    }
+    fetchExplanationCount();
+
+    return () => {
+      cancelled = true;
+    };
   }, [supabase]);
 
   // Fetch subtopics dynamically based on topics
@@ -398,7 +424,10 @@ export default function QuizSetupPage() {
         searchFilter: buildSearchOrFilter(searchInput),
       };
 
-      const rows = await fetchMatchingQuestionRows(supabase, filters);
+      const includeExplanations = pdfExplanations && explanationCount > 0;
+      const explanations = includeExplanations ? await fetchAllExplanations(supabase) : null;
+
+      const rows = await fetchMatchingQuestionRows(supabase, filters, explanations);
       if (rows.length === 0) {
         throw new Error('No questions matched the selected filters.');
       }
@@ -416,6 +445,7 @@ export default function QuizSetupPage() {
       await downloadQuestionPdf(rows, {
         filtersSummary: filterParts.length > 0 ? filterParts.join(' • ') : 'All questions',
         includeAnswerKey: pdfAnswerKey,
+        includeExplanations,
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not generate the PDF.');
@@ -557,6 +587,24 @@ export default function QuizSetupPage() {
                 either way — the key, if included, sits on separate pages at the end.
               </p>
             </div>
+            {explanationCount > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-white">PDF Explanations</label>
+                <PillToggle
+                  options={[
+                    { id: true, label: 'Include' },
+                    { id: false, label: 'Skip' },
+                  ]}
+                  selected={pdfExplanations}
+                  onChange={(v) => setPdfExplanations(v as boolean)}
+                />
+                <p className="max-w-md text-xs text-[var(--color-muted)]">
+                  Adds an Explanations section after the answer key, with the reasoning for the
+                  correct answer and the notes on each wrong option. Only questions that have an
+                  explanation appear there.
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
