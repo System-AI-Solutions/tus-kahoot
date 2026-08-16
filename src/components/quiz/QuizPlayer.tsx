@@ -9,7 +9,8 @@ import { AnswerGrid } from './AnswerGrid';
 import { FeedbackBanner } from './FeedbackBanner';
 import { ExplanationPanel } from './ExplanationPanel';
 import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
-import { calculateScore, formatExamSource } from '@/lib/utils';
+import { calculateScore } from '@/lib/utils';
+import { formatExamProvenance } from '@/lib/exam-source';
 import type { QuestionExplanation } from '@/lib/explanations';
 
 interface QuestionData {
@@ -226,7 +227,11 @@ export function QuizPlayer({
           questionNumber={currentIndex + 1}
           totalQuestions={questions.length}
           questionText={activeQuestion.question_text}
-          examSource={formatExamSource(activeQuestion.source_file, activeQuestion.question_number)}
+          examSource={formatExamProvenance(
+            activeQuestion.source_file,
+            activeQuestion.question_number
+          )}
+          sourceFile={activeQuestion.source_file}
           attendingTip={activeExplanation?.attending_tip ?? null}
         />
 

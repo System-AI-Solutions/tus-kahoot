@@ -31,6 +31,11 @@ export interface QuestionPdfOptions {
   filtersSummary?: string;
   includeAnswerKey: boolean;
   includeExplanations: boolean;
+  // Questions the export dropped because the user flagged them or quarantined
+  // the exam paper they came from. Reported in the header so the paper never
+  // looks silently incomplete.
+  omittedFlaggedCount?: number;
+  omittedSourceCount?: number;
   fonts: QuestionPdfFonts;
 }
 
@@ -147,6 +152,17 @@ function renderDocumentHeader(
   ];
   if (options.includeExplanations) {
     summaryEntries.push('Explanations: after the answer key');
+  }
+  const omittedFlagged = options.omittedFlaggedCount ?? 0;
+  const omittedSource = options.omittedSourceCount ?? 0;
+  const omittedTotal = omittedFlagged + omittedSource;
+  if (omittedTotal > 0) {
+    const omittedParts: string[] = [];
+    if (omittedFlagged > 0) omittedParts.push(`${omittedFlagged} flagged`);
+    if (omittedSource > 0) omittedParts.push(`${omittedSource} from excluded exam sources`);
+    summaryEntries.push(
+      `Omitted ${omittedTotal} question${omittedTotal === 1 ? '' : 's'}: ${omittedParts.join(', ')}`
+    );
   }
   const summaryLines = doc.splitTextToSize(
     summaryEntries.join('\n'),

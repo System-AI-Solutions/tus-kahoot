@@ -225,6 +225,65 @@ export interface Database {
           },
         ]
       }
+      question_flags: {
+        Row: {
+          id: string
+          user_id: string
+          join_key: string
+          reason: 'source_mismatch' | 'wrong_answer' | 'broken_question' | 'other'
+          note: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          join_key: string
+          reason?: 'source_mismatch' | 'wrong_answer' | 'broken_question' | 'other'
+          note?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['question_flags']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'question_flags_join_key_fkey'
+            columns: ['join_key']
+            isOneToOne: false
+            referencedRelation: 'questions'
+            referencedColumns: ['join_key']
+          },
+          {
+            foreignKeyName: 'question_flags_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      source_exclusions: {
+        Row: {
+          id: string
+          user_id: string
+          source_key: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          source_key: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['source_exclusions']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'source_exclusions_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
       bookmarks: {
         Row: {
           id: string

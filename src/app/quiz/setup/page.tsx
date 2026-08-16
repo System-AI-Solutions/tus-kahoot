@@ -1,18 +1,34 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
+import { ChevronDownIcon } from '@heroicons/react/24/outline';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { PillToggle } from '@/components/ui/PillToggle';
 import { ChipSelect } from '@/components/ui/ChipSelect';
 import { Header } from '@/components/Header';
 import { ANSWER_LETTERS, isSubtopicTag, type SubtopicTag } from '@/lib/constants';
-import { formatTopic } from '@/lib/utils';
+import { cn, formatTopic } from '@/lib/utils';
+import {
+  compareExamMeta,
+  examGroupKey,
+  formatExamLabel,
+  parseExamSource,
+  type ExamSourceMeta,
+} from '@/lib/exam-source';
 import {
   countExplanations,
   fetchAllExplanations,
   type QuestionExplanation,
 } from '@/lib/explanations';
+import {
+  EMPTY_EXCLUSIONS,
+  fetchExcludedSourceKeys,
+  fetchFlaggedJoinKeys,
+  isExcludedQuestion,
+  sourceKeyForFile,
+  type QuestionExclusions,
+} from '@/lib/source-integrity';
 import type { Database } from '@/lib/types/database';
 import type { PdfQuestionRow } from '@/lib/pdf/question-pdf';
 
@@ -41,6 +57,22 @@ interface QuestionFilters {
   searchFilter: string | null;
 }
 
+// One row of the candidate pool. source_file rides along with the key so
+// flagged questions and quarantined exam papers can be dropped client-side.
+interface PoolRow {
+  joinKey: string;
+  sourceFile: string | null;
+}
+
+// One exam paper as offered by the exam-source manager.
+interface ExamSourceGroup {
+  key: string;
+  meta: ExamSourceMeta;
+  label: string;
+  total: number;
+  flagged: number;
+}
+
 // Turns "tuberculosis, thyroid" into a PostgREST or() filter matching the
 // question stem or any option. Characters with meaning in the or()/LIKE
 // syntax are stripped so user input cannot break the query.
@@ -58,14 +90,14 @@ function buildSearchOrFilter(rawSearch: string): string | null {
     .join(',');
 }
 
-function buildJoinKeyQuery(
+function buildPoolQuery(
   supabase: SupabaseBrowserClient,
   filters: QuestionFilters,
   options?: { countOnly?: boolean }
 ) {
   let query = supabase
     .from('questions')
-    .select('join_key', options?.countOnly ? { count: 'exact', head: true } : undefined)
+    .select('join_key, source_file', options?.countOnly ? { count: 'exact', head: true } : undefined)
     .not('join_key', 'is', null)
     .in('correct_answer', [...ANSWER_LETTERS]);
 
@@ -77,14 +109,14 @@ function buildJoinKeyQuery(
   return query;
 }
 
-async function fetchMatchingJoinKeys(
+async function fetchMatchingPoolRows(
   supabase: SupabaseBrowserClient,
   filters: QuestionFilters
-): Promise<string[]> {
-  const joinKeys: string[] = [];
+): Promise<PoolRow[]> {
+  const rows: PoolRow[] = [];
 
   for (let from = 0; ; from += QUERY_PAGE_SIZE) {
-    const { data, error } = await buildJoinKeyQuery(supabase, filters).range(
+    const { data, error } = await buildPoolQuery(supabase, filters).range(
       from,
       from + QUERY_PAGE_SIZE - 1
     );
@@ -94,16 +126,37 @@ async function fetchMatchingJoinKeys(
     }
 
     const batch = data || [];
-    joinKeys.push(
-      ...batch
-        .map((row) => row.join_key)
-        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0)
-    );
+    for (const row of batch) {
+      if (typeof row.join_key === 'string' && row.join_key.length > 0) {
+        rows.push({ joinKey: row.join_key, sourceFile: row.source_file });
+      }
+    }
 
     if (batch.length < QUERY_PAGE_SIZE) break;
   }
 
-  return joinKeys;
+  return rows;
+}
+
+function groupPoolRowsByExam(
+  rows: PoolRow[],
+  flaggedJoinKeys: Set<string>
+): ExamSourceGroup[] {
+  const byKey = new Map<string, ExamSourceGroup>();
+
+  for (const row of rows) {
+    const meta = parseExamSource(row.sourceFile);
+    const key = examGroupKey(meta);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, meta, label: formatExamLabel(meta), total: 0, flagged: 0 };
+      byKey.set(key, group);
+    }
+    group.total += 1;
+    if (flaggedJoinKeys.has(row.joinKey)) group.flagged += 1;
+  }
+
+  return [...byKey.values()].sort((a, b) => compareExamMeta(a.meta, b.meta));
 }
 
 // RLS limits attempts to the signed-in user's own rows.
@@ -136,16 +189,28 @@ async function fetchAttemptedJoinKeys(supabase: SupabaseBrowserClient): Promise<
 const PDF_COLUMNS =
   'join_key, question_number, question_text, option_a, option_b, option_c, option_d, option_e, correct_answer, source_file';
 
+interface PdfQuestionRowsResult {
+  rows: PdfQuestionRow[];
+  omittedFlaggedCount: number;
+  omittedSourceCount: number;
+}
+
 // Full question rows for the printable study paper. Only rows with a usable
 // stem and a valid answer letter are kept; nullable option columns collapse to
 // empty strings so the PDF renderer always receives clean strings. Explanations
-// are attached by join_key when the export asks for them.
+// are attached by join_key when the export asks for them. Flagged questions and
+// excluded exam sources are dropped and counted so the PDF can say what it left
+// out.
 async function fetchMatchingQuestionRows(
   supabase: SupabaseBrowserClient,
   filters: QuestionFilters,
-  explanations: Map<string, QuestionExplanation> | null
-): Promise<PdfQuestionRow[]> {
+  explanations: Map<string, QuestionExplanation> | null,
+  exclusions: QuestionExclusions,
+  includeFlagged: boolean
+): Promise<PdfQuestionRowsResult> {
   const rows: PdfQuestionRow[] = [];
+  let omittedFlaggedCount = 0;
+  let omittedSourceCount = 0;
 
   for (let from = 0; ; from += QUERY_PAGE_SIZE) {
     let query = supabase
@@ -167,6 +232,17 @@ async function fetchMatchingQuestionRows(
     const batch = (data || []) as Array<Database['public']['Tables']['questions']['Row']>;
     for (const row of batch) {
       if (!row.question_text || !row.correct_answer) continue;
+      if (!includeFlagged && exclusions.flaggedJoinKeys.has(row.join_key)) {
+        omittedFlaggedCount += 1;
+        continue;
+      }
+      if (
+        exclusions.excludedSourceKeys.size > 0 &&
+        exclusions.excludedSourceKeys.has(sourceKeyForFile(row.source_file))
+      ) {
+        omittedSourceCount += 1;
+        continue;
+      }
       rows.push({
         question_number: row.question_number ?? null,
         question_text: row.question_text,
@@ -184,7 +260,7 @@ async function fetchMatchingQuestionRows(
     if (batch.length < QUERY_PAGE_SIZE) break;
   }
 
-  return rows;
+  return { rows, omittedFlaggedCount, omittedSourceCount };
 }
 
 export default function QuizSetupPage() {
@@ -201,14 +277,34 @@ export default function QuizSetupPage() {
   const [repeatMode, setRepeatMode] = useState<RepeatMode>('all');
   const [pdfAnswerKey, setPdfAnswerKey] = useState<boolean>(true);
   const [pdfExplanations, setPdfExplanations] = useState<boolean>(true);
+  const [pdfIncludeFlagged, setPdfIncludeFlagged] = useState<boolean>(false);
   const [explanationCount, setExplanationCount] = useState<number>(0);
 
   const [matchingCount, setMatchingCount] = useState<number>(0);
   const [totalMatchingCount, setTotalMatchingCount] = useState<number>(0);
+  const [excludedCount, setExcludedCount] = useState<number>(0);
   const [countLoading, setCountLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [flaggedJoinKeys, setFlaggedJoinKeys] = useState<Set<string>>(
+    () => EMPTY_EXCLUSIONS.flaggedJoinKeys
+  );
+  const [excludedSourceKeys, setExcludedSourceKeys] = useState<Set<string>>(
+    () => EMPTY_EXCLUSIONS.excludedSourceKeys
+  );
+  const [sourceManagerOpen, setSourceManagerOpen] = useState(false);
+  const [sourceGroups, setSourceGroups] = useState<ExamSourceGroup[]>([]);
+  const [sourceGroupsLoading, setSourceGroupsLoading] = useState(false);
+  const [pendingSourceKey, setPendingSourceKey] = useState<string | null>(null);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+
+  const exclusions: QuestionExclusions = useMemo(
+    () => ({ flaggedJoinKeys, excludedSourceKeys }),
+    [flaggedJoinKeys, excludedSourceKeys]
+  );
+  const hasExclusions = flaggedJoinKeys.size > 0 || excludedSourceKeys.size > 0;
 
   // Seed the keyword search from ?q= (used by the sidebar search box).
   useEffect(() => {
@@ -248,6 +344,27 @@ export default function QuizSetupPage() {
       if (!cancelled) setExplanationCount(count);
     }
     fetchExplanationCount();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  // The user's own quarantine lists. Both reads degrade to empty sets, so a
+  // missing table simply means nothing is excluded.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchQuarantine() {
+      const [flagged, excluded] = await Promise.all([
+        fetchFlaggedJoinKeys(supabase),
+        fetchExcludedSourceKeys(supabase),
+      ]);
+      if (cancelled) return;
+      setFlaggedJoinKeys(flagged);
+      setExcludedSourceKeys(excluded);
+    }
+    fetchQuarantine();
 
     return () => {
       cancelled = true;
@@ -297,24 +414,34 @@ export default function QuizSetupPage() {
       };
 
       try {
-        if (repeatMode === 'all') {
-          const { count, error } = await buildJoinKeyQuery(supabase, filters, { countOnly: true });
+        // The cheap head count only tells the truth when nothing is flagged or
+        // quarantined; otherwise the pool has to be listed and filtered here.
+        if (repeatMode === 'all' && !hasExclusions) {
+          const { count, error } = await buildPoolQuery(supabase, filters, { countOnly: true });
           if (error) {
             throw new Error(`Could not count matching questions: ${formatSupabaseError(error)}`);
           }
           if (!cancelled) {
             setMatchingCount(count || 0);
             setTotalMatchingCount(count || 0);
+            setExcludedCount(0);
           }
         } else {
-          const [matchingJoinKeys, attemptedJoinKeys] = await Promise.all([
-            fetchMatchingJoinKeys(supabase, filters),
-            fetchAttemptedJoinKeys(supabase),
+          const [poolRows, attemptedJoinKeys] = await Promise.all([
+            fetchMatchingPoolRows(supabase, filters),
+            repeatMode === 'unseen'
+              ? fetchAttemptedJoinKeys(supabase)
+              : Promise.resolve(new Set<string>()),
           ]);
-          const unseen = matchingJoinKeys.filter((joinKey) => !attemptedJoinKeys.has(joinKey));
+          const usableRows = poolRows.filter((row) => !isExcludedQuestion(exclusions, row));
+          const unseenRows =
+            repeatMode === 'unseen'
+              ? usableRows.filter((row) => !attemptedJoinKeys.has(row.joinKey))
+              : usableRows;
           if (!cancelled) {
-            setMatchingCount(unseen.length);
-            setTotalMatchingCount(matchingJoinKeys.length);
+            setMatchingCount(unseenRows.length);
+            setTotalMatchingCount(usableRows.length);
+            setExcludedCount(poolRows.length - usableRows.length);
           }
         }
         if (!cancelled) {
@@ -326,6 +453,7 @@ export default function QuizSetupPage() {
           setErrorMessage(error instanceof Error ? error.message : 'Could not count questions.');
           setMatchingCount(0);
           setTotalMatchingCount(0);
+          setExcludedCount(0);
           setCountLoading(false);
         }
       }
@@ -335,7 +463,105 @@ export default function QuizSetupPage() {
       cancelled = true;
       window.clearTimeout(timerId);
     };
-  }, [excludeIncomplete, selectedTopics, selectedSubtopics, searchInput, repeatMode, supabase]);
+  }, [
+    excludeIncomplete,
+    selectedTopics,
+    selectedSubtopics,
+    searchInput,
+    repeatMode,
+    exclusions,
+    hasExclusions,
+    supabase,
+  ]);
+
+  // The exam-source manager lists the same pool grouped by exam paper, so it
+  // only pays for that extra listing while the section is open.
+  useEffect(() => {
+    if (!sourceManagerOpen) return;
+
+    let cancelled = false;
+
+    setSourceGroupsLoading(true);
+    const timerId = window.setTimeout(async () => {
+      const filters: QuestionFilters = {
+        excludeIncomplete,
+        topics: selectedTopics,
+        subtopics: selectedSubtopics,
+        searchFilter: buildSearchOrFilter(searchInput),
+      };
+
+      try {
+        const poolRows = await fetchMatchingPoolRows(supabase, filters);
+        if (cancelled) return;
+        setSourceGroups(groupPoolRowsByExam(poolRows, flaggedJoinKeys));
+        setSourceError(null);
+      } catch (error) {
+        if (!cancelled) {
+          setSourceError(
+            error instanceof Error ? error.message : 'Could not load exam sources.'
+          );
+          setSourceGroups([]);
+        }
+      } finally {
+        if (!cancelled) setSourceGroupsLoading(false);
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timerId);
+    };
+  }, [
+    sourceManagerOpen,
+    excludeIncomplete,
+    selectedTopics,
+    selectedSubtopics,
+    searchInput,
+    flaggedJoinKeys,
+    supabase,
+  ]);
+
+  const toggleSourceExclusion = async (group: ExamSourceGroup) => {
+    if (pendingSourceKey) return;
+    setPendingSourceKey(group.key);
+    setSourceError(null);
+
+    const wasExcluded = excludedSourceKeys.has(group.key);
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user) {
+      setSourceError('You must be logged in to change exam sources.');
+      setPendingSourceKey(null);
+      return;
+    }
+
+    const { error } = wasExcluded
+      ? await supabase
+          .from('source_exclusions')
+          .delete()
+          .eq('user_id', userData.user.id)
+          .eq('source_key', group.key)
+      : await supabase
+          .from('source_exclusions')
+          .upsert(
+            { user_id: userData.user.id, source_key: group.key },
+            { onConflict: 'user_id,source_key', ignoreDuplicates: true }
+          );
+
+    if (error) {
+      setSourceError(`Could not update this exam source: ${formatSupabaseError(error)}`);
+      setPendingSourceKey(null);
+      return;
+    }
+
+    setExcludedSourceKeys((previous) => {
+      const next = new Set(previous);
+      if (wasExcluded) next.delete(group.key);
+      else next.add(group.key);
+      return next;
+    });
+    setPendingSourceKey(null);
+  };
 
   const handleStart = async () => {
     if (matchingCount === 0) return;
@@ -356,7 +582,16 @@ export default function QuizSetupPage() {
         searchFilter: buildSearchOrFilter(searchInput),
       };
 
-      let availableJoinKeys = await fetchMatchingJoinKeys(supabase, filters);
+      const poolRows = await fetchMatchingPoolRows(supabase, filters);
+      const usableRows = poolRows.filter((row) => !isExcludedQuestion(exclusions, row));
+
+      if (usableRows.length === 0 && poolRows.length > 0) {
+        throw new Error(
+          'Every matching question is flagged or comes from an excluded exam source. Clear a flag or switch a source back on to practise them.'
+        );
+      }
+
+      let availableJoinKeys = usableRows.map((row) => row.joinKey);
 
       if (repeatMode === 'unseen') {
         const attemptedJoinKeys = await fetchAttemptedJoinKeys(supabase);
@@ -427,9 +662,19 @@ export default function QuizSetupPage() {
       const includeExplanations = pdfExplanations && explanationCount > 0;
       const explanations = includeExplanations ? await fetchAllExplanations(supabase) : null;
 
-      const rows = await fetchMatchingQuestionRows(supabase, filters, explanations);
+      const { rows, omittedFlaggedCount, omittedSourceCount } = await fetchMatchingQuestionRows(
+        supabase,
+        filters,
+        explanations,
+        exclusions,
+        pdfIncludeFlagged
+      );
       if (rows.length === 0) {
-        throw new Error('No questions matched the selected filters.');
+        throw new Error(
+          omittedFlaggedCount + omittedSourceCount > 0
+            ? 'Every matching question is flagged or comes from an excluded exam source.'
+            : 'No questions matched the selected filters.'
+        );
       }
 
       const filterParts: string[] = [];
@@ -446,6 +691,8 @@ export default function QuizSetupPage() {
         filtersSummary: filterParts.length > 0 ? filterParts.join(' • ') : 'All questions',
         includeAnswerKey: pdfAnswerKey,
         includeExplanations,
+        omittedFlaggedCount,
+        omittedSourceCount,
       });
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Could not generate the PDF.');
@@ -605,7 +852,116 @@ export default function QuizSetupPage() {
                 </p>
               </div>
             )}
+            {flaggedJoinKeys.size > 0 && (
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-white">PDF Flagged Questions</label>
+                <PillToggle
+                  options={[
+                    { id: false, label: 'Leave Out' },
+                    { id: true, label: 'Include' },
+                  ]}
+                  selected={pdfIncludeFlagged}
+                  onChange={(v) => setPdfIncludeFlagged(v as boolean)}
+                />
+                <p className="max-w-md text-xs text-[var(--color-muted)]">
+                  You have flagged {flaggedJoinKeys.size} question
+                  {flaggedJoinKeys.size === 1 ? '' : 's'}. They stay out of the PDF unless you
+                  include them here. Excluded exam sources are always left out.
+                </p>
+              </div>
+            )}
           </div>
+        </div>
+
+        <div className="rounded-[var(--radius-card)] bg-[var(--color-card)] p-6">
+          <button
+            type="button"
+            onClick={() => setSourceManagerOpen((open) => !open)}
+            className="flex w-full items-start justify-between gap-4 text-left"
+          >
+            <span className="min-w-0">
+              <span className="block text-sm font-semibold text-white">
+                Exam Sources
+                {excludedSourceKeys.size > 0 && (
+                  <span className="ml-2 rounded-[var(--radius-chip)] bg-red-500/15 px-2 py-0.5 text-xs font-bold text-red-200">
+                    {excludedSourceKeys.size} excluded
+                  </span>
+                )}
+              </span>
+              <span className="mt-1 block max-w-2xl text-xs text-[var(--color-muted)]">
+                Switch off a whole exam paper when its question numbers do not line up with the
+                official file. Excluded papers and flagged questions never enter a quiz or a PDF.
+              </span>
+            </span>
+            <ChevronDownIcon
+              className={cn(
+                'h-5 w-5 shrink-0 text-[var(--color-muted)] transition-transform',
+                sourceManagerOpen && 'rotate-180'
+              )}
+            />
+          </button>
+
+          {sourceManagerOpen && (
+            <div className="mt-4 space-y-3">
+              {sourceError && (
+                <div className="rounded-[var(--radius-card)] border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+                  {sourceError}
+                </div>
+              )}
+
+              {sourceGroupsLoading && sourceGroups.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted)]">Loading exam sources...</p>
+              ) : sourceGroups.length === 0 ? (
+                <p className="text-sm text-[var(--color-muted)]">
+                  No exam sources match the current filters.
+                </p>
+              ) : (
+                <div className="max-h-96 space-y-2 overflow-y-auto pr-1">
+                  {sourceGroups.map((group) => {
+                    const isExcluded = excludedSourceKeys.has(group.key);
+                    const isPending = pendingSourceKey === group.key;
+
+                    return (
+                      <div
+                        key={group.key}
+                        className={cn(
+                          'flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-button)] border p-3',
+                          isExcluded
+                            ? 'border-red-500/30 bg-[var(--color-surface)]/40 opacity-70'
+                            : 'border-[var(--color-surface)] bg-[var(--color-surface)]'
+                        )}
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-white">
+                            {group.label}
+                          </p>
+                          <p className="text-xs text-[var(--color-muted)]">
+                            {group.total} question{group.total === 1 ? '' : 's'}
+                            {group.flagged > 0 && ` · ${group.flagged} flagged`}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          {isExcluded && (
+                            <span className="rounded-[var(--radius-chip)] bg-red-500/15 px-3 py-1 text-xs font-bold text-red-200">
+                              Excluded
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => toggleSourceExclusion(group)}
+                            disabled={isPending || pendingSourceKey !== null}
+                            className="rounded-[var(--radius-button)] border border-white/25 px-4 py-1.5 text-xs font-bold text-white transition-colors hover:border-white/60 hover:bg-white/10 disabled:opacity-50"
+                          >
+                            {isPending ? 'Saving...' : isExcluded ? 'Use Again' : 'Exclude'}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {errorMessage && (
@@ -653,6 +1009,12 @@ export default function QuizSetupPage() {
               </button>
             </div>
           </div>
+          {excludedCount > 0 && (
+            <p className="mt-3 text-xs text-[var(--color-muted)]">
+              {excludedCount} matching question{excludedCount === 1 ? '' : 's'} left out: flagged or
+              from an excluded exam source.
+            </p>
+          )}
           <p className="mt-3 text-xs text-[var(--color-muted)]">
             Download PDF saves every matching question — no quiz, no timer — organised by exam year,
             1st/2nd exam and K/T, numbered as in the original exam. The &quot;New Questions Only&quot;
