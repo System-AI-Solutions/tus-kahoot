@@ -6,6 +6,8 @@ import {
   parseExamSource,
   type ExamSourceMeta,
 } from '@/lib/exam-source';
+import { getOptionExplanation, type QuestionExplanation } from '@/lib/explanations';
+import { ANSWER_LETTERS } from '@/lib/constants';
 
 export interface PdfQuestionRow {
   question_number: number | null;
@@ -17,6 +19,7 @@ export interface PdfQuestionRow {
   option_e: string | null;
   correct_answer: 'A' | 'B' | 'C' | 'D' | 'E';
   source_file: string | null;
+  explanation?: QuestionExplanation | null;
 }
 
 export interface QuestionPdfFonts {
@@ -27,6 +30,12 @@ export interface QuestionPdfFonts {
 export interface QuestionPdfOptions {
   filtersSummary?: string;
   includeAnswerKey: boolean;
+  includeExplanations: boolean;
+  // Questions the export dropped because the user flagged them or quarantined
+  // the exam paper they came from. Reported in the header so the paper never
+  // looks silently incomplete.
+  omittedFlaggedCount?: number;
+  omittedSourceCount?: number;
   fonts: QuestionPdfFonts;
 }
 
@@ -78,6 +87,10 @@ export function buildQuestionPdf(rows: PdfQuestionRow[], options: QuestionPdfOpt
 
   if (options.includeAnswerKey) {
     renderAnswerKey(doc, cursor, groups);
+  }
+
+  if (options.includeExplanations) {
+    renderExplanations(doc, cursor, groups);
   }
 
   addPageNumbers(doc);
@@ -132,12 +145,27 @@ function renderDocumentHeader(
   doc.setFontSize(10);
   doc.setTextColor(90);
   const generatedOn = new Date().toISOString().slice(0, 10);
+  const summaryEntries = [
+    options.filtersSummary || 'All questions',
+    `${questionCount} question${questionCount === 1 ? '' : 's'} • generated ${generatedOn}`,
+    options.includeAnswerKey ? 'Answer key: last pages' : 'Answer key: not included',
+  ];
+  if (options.includeExplanations) {
+    summaryEntries.push('Explanations: after the answer key');
+  }
+  const omittedFlagged = options.omittedFlaggedCount ?? 0;
+  const omittedSource = options.omittedSourceCount ?? 0;
+  const omittedTotal = omittedFlagged + omittedSource;
+  if (omittedTotal > 0) {
+    const omittedParts: string[] = [];
+    if (omittedFlagged > 0) omittedParts.push(`${omittedFlagged} flagged`);
+    if (omittedSource > 0) omittedParts.push(`${omittedSource} from excluded exam sources`);
+    summaryEntries.push(
+      `Omitted ${omittedTotal} question${omittedTotal === 1 ? '' : 's'}: ${omittedParts.join(', ')}`
+    );
+  }
   const summaryLines = doc.splitTextToSize(
-    [
-      options.filtersSummary || 'All questions',
-      `${questionCount} question${questionCount === 1 ? '' : 's'} • generated ${generatedOn}`,
-      options.includeAnswerKey ? 'Answer key: last pages' : 'Answer key: not included',
-    ].join('\n'),
+    summaryEntries.join('\n'),
     CONTENT_WIDTH
   ) as string[];
   doc.text(summaryLines, MARGIN, cursor.y + 4);
@@ -278,6 +306,116 @@ function renderAnswerKey(doc: jsPDF, cursor: Cursor, groups: ExamGroup[]): void 
     doc.setTextColor(20);
     cursor.y += 4;
   }
+}
+
+interface ExplanationBlock {
+  heading: string | null;
+  text: string;
+}
+
+interface ExplanationEntry {
+  question: PdfQuestionRow;
+  indexInGroup: number;
+  blocks: ExplanationBlock[];
+}
+
+// Same rule as the on-screen panel: the authored explanation is the main text,
+// falling back to the correct option's own note, and every other option note
+// follows as "why not" lines.
+function explanationBlocks(question: PdfQuestionRow): ExplanationBlock[] {
+  const source = question.explanation;
+  if (!source) return [];
+
+  const authoredMain = source.explanation?.trim() || null;
+  const correctNote = getOptionExplanation(source, question.correct_answer);
+  const main = authoredMain ?? correctNote;
+
+  const blocks: ExplanationBlock[] = [];
+  if (main) {
+    blocks.push({ heading: `Correct answer: ${question.correct_answer}`, text: main });
+  }
+
+  for (const letter of ANSWER_LETTERS) {
+    if (letter === question.correct_answer && !authoredMain) continue;
+    const note = getOptionExplanation(source, letter);
+    if (!note) continue;
+    blocks.push({ heading: null, text: `${letter}) ${note}` });
+  }
+
+  return blocks;
+}
+
+function renderExplanations(doc: jsPDF, cursor: Cursor, groups: ExamGroup[]): void {
+  const groupsWithExplanations = groups
+    .map((group) => ({
+      label: group.label,
+      entries: group.questions
+        .map((question, indexInGroup) => ({
+          question,
+          indexInGroup,
+          blocks: explanationBlocks(question),
+        }))
+        .filter((entry): entry is ExplanationEntry => entry.blocks.length > 0),
+    }))
+    .filter((group) => group.entries.length > 0);
+
+  if (groupsWithExplanations.length === 0) return;
+
+  doc.addPage();
+  cursor.y = MARGIN;
+
+  doc.setFont('Roboto', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(20);
+  doc.text('Explanations', MARGIN, cursor.y + 5);
+  cursor.y += 12;
+
+  for (const group of groupsWithExplanations) {
+    breakPageIfNeeded(doc, cursor, 20);
+    doc.setFont('Roboto', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(20);
+    doc.text(group.label, MARGIN, cursor.y + 4);
+    cursor.y += 8;
+
+    for (const entry of group.entries) {
+      renderQuestionExplanation(doc, cursor, entry);
+    }
+    cursor.y += 3;
+  }
+}
+
+function renderQuestionExplanation(doc: jsPDF, cursor: Cursor, entry: ExplanationEntry): void {
+  breakPageIfNeeded(doc, cursor, 16);
+
+  doc.setFont('Roboto', 'bold');
+  doc.setFontSize(10.5);
+  doc.setTextColor(20);
+  doc.text(questionLabel(entry.question, entry.indexInGroup), MARGIN, cursor.y + 4);
+
+  doc.setFontSize(10);
+  for (const block of entry.blocks) {
+    if (block.heading) {
+      breakPageIfNeeded(doc, cursor, OPTION_LINE_HEIGHT);
+      doc.setFont('Roboto', 'bold');
+      doc.setTextColor(20);
+      doc.text(block.heading, MARGIN + STEM_INDENT, cursor.y + 4);
+      cursor.y += OPTION_LINE_HEIGHT;
+    }
+
+    doc.setFont('Roboto', 'normal');
+    doc.setTextColor(45);
+    const lines = doc.splitTextToSize(block.text, CONTENT_WIDTH - STEM_INDENT) as string[];
+    for (const line of lines) {
+      breakPageIfNeeded(doc, cursor, OPTION_LINE_HEIGHT);
+      doc.text(line, MARGIN + STEM_INDENT, cursor.y + 4);
+      cursor.y += OPTION_LINE_HEIGHT;
+    }
+    cursor.y += 1.5;
+  }
+
+  doc.setTextColor(20);
+  cursor.y += 3.5;
 }
 
 function addPageNumbers(doc: jsPDF): void {

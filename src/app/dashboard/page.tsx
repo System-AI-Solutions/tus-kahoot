@@ -92,6 +92,12 @@ export default async function DashboardPage() {
           >
             Review Wrong Answers
           </Link>
+          <Link
+            href="/flagged"
+            className="rounded-[var(--radius-button)] bg-[var(--color-surface)] px-6 py-3 font-medium text-white transition-colors hover:bg-[var(--color-surface)]/80"
+          >
+            Flagged Questions
+          </Link>
         </div>
 
         <section>
