@@ -11,7 +11,7 @@ import { ExplanationPanel } from './ExplanationPanel';
 import { TIMER_DURATION_MS, type AnswerLetter } from '@/lib/constants';
 import { calculateScore } from '@/lib/utils';
 import { formatExamProvenance } from '@/lib/exam-source';
-import type { QuestionExplanation } from '@/lib/explanations';
+import { getStemHighlights, type QuestionExplanation } from '@/lib/explanations';
 
 interface QuestionData {
   question_number: number;
@@ -233,6 +233,7 @@ export function QuizPlayer({
           )}
           sourceFile={activeQuestion.source_file}
           attendingTip={activeExplanation?.attending_tip ?? null}
+          stemHighlights={status === 'revealed' ? getStemHighlights(activeExplanation) : null}
         />
 
         <div className="mx-auto mt-12 w-full max-w-4xl px-4">

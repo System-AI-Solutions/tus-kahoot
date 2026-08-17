@@ -3,6 +3,7 @@ import { BookmarkIcon as BookmarkSolid } from '@heroicons/react/24/solid';
 import { BookmarkIcon as BookmarkOutline, LightBulbIcon } from '@heroicons/react/24/outline';
 import { createClient } from '@/lib/supabase/client';
 import { QuestionFlagButton } from './QuestionFlagButton';
+import { HighlightedText } from './HighlightedText';
 
 interface QuestionCardProps {
   joinKey: string;
@@ -14,9 +15,12 @@ interface QuestionCardProps {
   // can be checked against the original document.
   sourceFile?: string | null;
   attendingTip?: string | null;
+  // Key stem phrases to mark, AMBOSS-style. The player only passes them once
+  // the answer is revealed, so a highlight can never give the answer away.
+  stemHighlights?: string[] | null;
 }
 
-export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText, examSource, sourceFile, attendingTip }: QuestionCardProps) {
+export function QuestionCard({ joinKey, questionNumber, totalQuestions, questionText, examSource, sourceFile, attendingTip, stemHighlights }: QuestionCardProps) {
   const [bookmarked, setBookmarked] = React.useState(false);
   const [tipOpen, setTipOpen] = React.useState(false);
   const supabase = React.useMemo(() => createClient(), []);
@@ -95,7 +99,7 @@ export function QuestionCard({ joinKey, questionNumber, totalQuestions, question
         </div>
       </div>
       <h2 className="text-xl font-bold leading-relaxed text-black">
-        {questionText}
+        <HighlightedText text={questionText} phrases={stemHighlights ?? []} tone="light" />
       </h2>
       {attendingTip && (
         <div className="mt-5">

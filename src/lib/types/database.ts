@@ -198,6 +198,7 @@ export interface Database {
           key_info: string | null
           image_url: string | null
           source_note: string | null
+          stem_highlights: string[] | null
           updated_at: string
         }
         Insert: {
@@ -212,6 +213,7 @@ export interface Database {
           key_info?: string | null
           image_url?: string | null
           source_note?: string | null
+          stem_highlights?: string[] | null
           updated_at?: string
         }
         Update: Partial<Database['public']['Tables']['question_explanations']['Insert']>

@@ -1,12 +1,13 @@
 import { createClient } from '@/lib/supabase/server';
 import { Header } from '@/components/Header';
 import { ExplanationPanel } from '@/components/quiz/ExplanationPanel';
+import { HighlightedText } from '@/components/quiz/HighlightedText';
 import { QuestionFlagButton } from '@/components/quiz/QuestionFlagButton';
 import { formatTopic, cn } from '@/lib/utils';
 import { formatExamProvenance } from '@/lib/exam-source';
 import Link from 'next/link';
 import { ANSWER_COLORS, isAnswerLetter, type AnswerLetter } from '@/lib/constants';
-import { fetchExplanationsByJoinKey } from '@/lib/explanations';
+import { fetchExplanationsByJoinKey, getStemHighlights } from '@/lib/explanations';
 import { fetchFlagsByJoinKey } from '@/lib/source-integrity';
 import type { Database } from '@/lib/types/database';
 
@@ -145,7 +146,14 @@ export default async function ReviewPage() {
                           />
                         </div>
                         <p className="mb-6 font-medium text-white">
-                          {q.question_text || 'Question text unavailable'}
+                          {q.question_text ? (
+                            <HighlightedText
+                              text={q.question_text}
+                              phrases={getStemHighlights(explanations.get(q.join_key))}
+                            />
+                          ) : (
+                            'Question text unavailable'
+                          )}
                         </p>
                         
                         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">

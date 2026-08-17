@@ -9,6 +9,13 @@ export type QuestionExplanation =
 type ExplanationClient = SupabaseClient<Database>;
 
 export const EXPLANATION_COLUMNS =
+  'join_key, explanation, option_a_explanation, option_b_explanation, option_c_explanation, option_d_explanation, option_e_explanation, attending_tip, key_info, image_url, source_note, stem_highlights, updated_at';
+
+// stem_highlights ships in a later migration (20260817090000) than the table
+// itself: selecting it from a database that only ran the table migration fails
+// whole with 42703 (undefined column), which would silently drop every
+// explanation. Reads retry once against the pre-highlight column list instead.
+const LEGACY_EXPLANATION_COLUMNS =
   'join_key, explanation, option_a_explanation, option_b_explanation, option_c_explanation, option_d_explanation, option_e_explanation, attending_tip, key_info, image_url, source_note, updated_at';
 
 // PostgREST caps a single select at 1000 rows, and long in() lists blow up the
@@ -68,8 +75,35 @@ export function hasExplanationContent(
   ].some((value) => cleanText(value) !== null);
 }
 
+// The stem phrases worth marking in the question text, cleaned for rendering.
+// Rows read through the legacy column fallback simply lack the field.
+export function getStemHighlights(
+  explanation: QuestionExplanation | null | undefined
+): string[] {
+  if (!explanation?.stem_highlights) return [];
+  return explanation.stem_highlights
+    .map((phrase) => phrase.trim())
+    .filter((phrase) => phrase.length > 0);
+}
+
 function toExplanationMap(rows: QuestionExplanation[]): Map<string, QuestionExplanation> {
   return new Map(rows.map((row) => [row.join_key, row]));
+}
+
+type ExplanationSelectResult = {
+  data: unknown;
+  error: { code?: string; message?: string } | null;
+};
+
+async function selectExplanations(
+  run: (columns: string) => PromiseLike<ExplanationSelectResult>
+): Promise<{ rows: QuestionExplanation[]; error: ExplanationSelectResult['error'] }> {
+  let result = await run(EXPLANATION_COLUMNS);
+  if (result.error?.code === '42703') {
+    result = await run(LEGACY_EXPLANATION_COLUMNS);
+  }
+  if (result.error) return { rows: [], error: result.error };
+  return { rows: ((result.data ?? []) as QuestionExplanation[]), error: null };
 }
 
 // Explanations are optional content: when the table is missing or unreadable
@@ -85,17 +119,17 @@ export async function fetchExplanationsByJoinKey(
   const rows: QuestionExplanation[] = [];
 
   for (let from = 0; from < uniqueKeys.length; from += KEY_BATCH_SIZE) {
-    const { data, error } = await supabase
-      .from('question_explanations')
-      .select(EXPLANATION_COLUMNS)
-      .in('join_key', uniqueKeys.slice(from, from + KEY_BATCH_SIZE));
+    const batchKeys = uniqueKeys.slice(from, from + KEY_BATCH_SIZE);
+    const { rows: batch, error } = await selectExplanations((columns) =>
+      supabase.from('question_explanations').select(columns).in('join_key', batchKeys)
+    );
 
     if (error) {
       console.error('Could not load answer explanations.', error);
       return toExplanationMap(rows);
     }
 
-    rows.push(...((data ?? []) as QuestionExplanation[]));
+    rows.push(...batch);
   }
 
   return toExplanationMap(rows);
@@ -109,17 +143,18 @@ export async function fetchAllExplanations(
   const rows: QuestionExplanation[] = [];
 
   for (let from = 0; ; from += QUERY_PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from('question_explanations')
-      .select(EXPLANATION_COLUMNS)
-      .range(from, from + QUERY_PAGE_SIZE - 1);
+    const { rows: batch, error } = await selectExplanations((columns) =>
+      supabase
+        .from('question_explanations')
+        .select(columns)
+        .range(from, from + QUERY_PAGE_SIZE - 1)
+    );
 
     if (error) {
       console.error('Could not load answer explanations.', error);
       break;
     }
 
-    const batch = (data ?? []) as QuestionExplanation[];
     rows.push(...batch);
     if (batch.length < QUERY_PAGE_SIZE) break;
   }

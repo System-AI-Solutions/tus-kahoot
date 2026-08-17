@@ -27,6 +27,8 @@ interface Draft {
   key_info: string;
   image_url: string;
   source_note: string;
+  // One stem phrase per line in the editor, text[] in the database.
+  stem_highlights: string;
 }
 
 const OPTION_FIELDS = {
@@ -49,12 +51,21 @@ function toDraft(explanation: QuestionExplanation | null): Draft {
     key_info: explanation?.key_info ?? '',
     image_url: explanation?.image_url ?? '',
     source_note: explanation?.source_note ?? '',
+    stem_highlights: (explanation?.stem_highlights ?? []).join('\n'),
   };
 }
 
 function orNull(value: string): string | null {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function toHighlightArray(value: string): string[] | null {
+  const phrases = value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  return phrases.length > 0 ? phrases : null;
 }
 
 const FIELD_CLASS =
@@ -93,6 +104,7 @@ export function ExplanationEditor({
       key_info: orNull(draft.key_info),
       image_url: orNull(draft.image_url),
       source_note: orNull(draft.source_note),
+      stem_highlights: toHighlightArray(draft.stem_highlights),
     };
 
     const supabase = createClient();
@@ -180,6 +192,20 @@ export function ExplanationEditor({
             className={FIELD_CLASS}
           />
         </div>
+      </div>
+
+      <div>
+        <label className={LABEL_CLASS} htmlFor={`stem-highlights-${joinKey}`}>
+          Stem highlights (one phrase per line, exactly as written in the question; marked
+          in the stem once the answer is revealed)
+        </label>
+        <textarea
+          id={`stem-highlights-${joinKey}`}
+          rows={3}
+          value={draft.stem_highlights}
+          onChange={(event) => update('stem_highlights', event.target.value)}
+          className={FIELD_CLASS}
+        />
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
