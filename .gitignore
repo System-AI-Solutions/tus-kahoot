@@ -42,3 +42,6 @@ supabase/.temp/
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Official OSYM exam papers (copyrighted, local intake only; see issue #12)
+/official-papers/

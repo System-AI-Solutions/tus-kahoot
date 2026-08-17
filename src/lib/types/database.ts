@@ -185,6 +185,141 @@ export interface Database {
           },
         ]
       }
+      question_explanations: {
+        Row: {
+          join_key: string
+          explanation: string | null
+          option_a_explanation: string | null
+          option_b_explanation: string | null
+          option_c_explanation: string | null
+          option_d_explanation: string | null
+          option_e_explanation: string | null
+          attending_tip: string | null
+          key_info: string | null
+          image_url: string | null
+          source_note: string | null
+          stem_highlights: string[] | null
+          updated_at: string
+        }
+        Insert: {
+          join_key: string
+          explanation?: string | null
+          option_a_explanation?: string | null
+          option_b_explanation?: string | null
+          option_c_explanation?: string | null
+          option_d_explanation?: string | null
+          option_e_explanation?: string | null
+          attending_tip?: string | null
+          key_info?: string | null
+          image_url?: string | null
+          source_note?: string | null
+          stem_highlights?: string[] | null
+          updated_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['question_explanations']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'question_explanations_join_key_fkey'
+            columns: ['join_key']
+            isOneToOne: true
+            referencedRelation: 'questions'
+            referencedColumns: ['join_key']
+          },
+        ]
+      }
+      question_flags: {
+        Row: {
+          id: string
+          user_id: string
+          join_key: string
+          reason: 'source_mismatch' | 'wrong_answer' | 'broken_question' | 'other'
+          note: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          join_key: string
+          reason?: 'source_mismatch' | 'wrong_answer' | 'broken_question' | 'other'
+          note?: string | null
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['question_flags']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'question_flags_join_key_fkey'
+            columns: ['join_key']
+            isOneToOne: false
+            referencedRelation: 'questions'
+            referencedColumns: ['join_key']
+          },
+          {
+            foreignKeyName: 'question_flags_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      source_exclusions: {
+        Row: {
+          id: string
+          user_id: string
+          source_key: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          source_key: string
+          created_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['source_exclusions']['Insert']>
+        Relationships: [
+          {
+            foreignKeyName: 'source_exclusions_user_id_fkey'
+            columns: ['user_id']
+            isOneToOne: false
+            referencedRelation: 'users'
+            referencedColumns: ['id']
+          },
+        ]
+      }
+      official_questions: {
+        Row: {
+          exam_group_key: string
+          source_file: string
+          question_number: number
+          stem: string
+          option_a: string | null
+          option_b: string | null
+          option_c: string | null
+          option_d: string | null
+          option_e: string | null
+          correct_answer: 'A' | 'B' | 'C' | 'D' | 'E' | null
+          is_cancelled: boolean
+          parse_note: string | null
+          imported_at: string
+        }
+        Insert: {
+          exam_group_key: string
+          source_file: string
+          question_number: number
+          stem: string
+          option_a?: string | null
+          option_b?: string | null
+          option_c?: string | null
+          option_d?: string | null
+          option_e?: string | null
+          correct_answer?: 'A' | 'B' | 'C' | 'D' | 'E' | null
+          is_cancelled?: boolean
+          parse_note?: string | null
+          imported_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['official_questions']['Insert']>
+        Relationships: []
+      }
       bookmarks: {
         Row: {
           id: string

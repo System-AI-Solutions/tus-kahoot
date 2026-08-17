@@ -7,6 +7,8 @@ import { createClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { AccuracyRing } from '@/components/ui/AccuracyRing';
 import { openQuizPdf, type PdfQuestion } from '@/lib/quiz/exam-pdf';
+import { fetchExplanationsByJoinKey, getMainExplanation } from '@/lib/explanations';
+import { isAnswerLetter } from '@/lib/constants';
 import { formatExamSource } from '@/lib/utils';
 import Link from 'next/link';
 
@@ -207,10 +209,21 @@ export default function ResultsPage() {
         throw new Error(error?.message || 'Could not load questions for the PDF.');
       }
 
+      // The explanation section of the printout is optional: a missing or
+      // unreadable explanation table just leaves it out.
+      const explanations = await fetchExplanationsByJoinKey(supabase, joinKeys);
+
       const questionByJoinKey = new Map(data.map((question) => [question.join_key, question]));
       const orderedQuestions: PdfQuestion[] = joinKeys
         .map((joinKey) => questionByJoinKey.get(joinKey))
-        .filter((question): question is NonNullable<typeof question> => Boolean(question));
+        .filter((question): question is NonNullable<typeof question> => Boolean(question))
+        .map((question) => ({
+          ...question,
+          explanation: getMainExplanation(
+            explanations.get(question.join_key) ?? null,
+            isAnswerLetter(question.correct_answer) ? question.correct_answer : null
+          ),
+        }));
 
       if (orderedQuestions.length === 0) {
         throw new Error('No question data available for this quiz.');

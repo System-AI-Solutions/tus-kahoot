@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useQuizStore } from '@/lib/stores/quiz-store';
 import { ANSWER_LETTERS, type SubtopicTag } from '@/lib/constants';
+import { fetchQuestionExclusions, isExcludedQuestion } from '@/lib/source-integrity';
 
 type SectionFilter = 'all' | 'basic_sciences' | 'clinical_sciences';
 
@@ -52,7 +53,7 @@ export function useStartQuiz() {
 
       let query = supabase
         .from('questions')
-        .select('join_key')
+        .select('join_key, source_file')
         .not('join_key', 'is', null)
         .in('correct_answer', [...ANSWER_LETTERS]);
       if (selectedTopics.length > 0) query = query.in('topic', selectedTopics);
@@ -67,16 +68,31 @@ export function useStartQuiz() {
         return fail('No questions matched those filters.');
       }
 
-      const shuffled = [...questions].sort(() => 0.5 - Math.random());
-      const selectedQuestions =
-        questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
-      const questionJoinKeys = selectedQuestions
+      // Questions the user flagged and exam papers they quarantined never enter
+      // a quiz pool.
+      const exclusions = await fetchQuestionExclusions(supabase);
+      const usableJoinKeys = questions
+        .filter(
+          (question) =>
+            typeof question.join_key === 'string' &&
+            question.join_key.length > 0 &&
+            !isExcludedQuestion(exclusions, {
+              joinKey: question.join_key,
+              sourceFile: question.source_file,
+            })
+        )
         .map((question) => question.join_key)
-        .filter((joinKey): joinKey is string => typeof joinKey === 'string' && joinKey.length > 0);
+        .filter((joinKey): joinKey is string => typeof joinKey === 'string');
 
-      if (questionJoinKeys.length === 0) {
-        return fail('No questions matched those filters.');
+      if (usableJoinKeys.length === 0) {
+        return fail(
+          'Every question matching those filters is flagged or comes from an excluded exam source.'
+        );
       }
+
+      const shuffled = [...usableJoinKeys].sort(() => 0.5 - Math.random());
+      const questionJoinKeys =
+        questionCount === -1 ? shuffled : shuffled.slice(0, questionCount);
 
       const sectionFilter = section === 'all' ? null : section;
       const { data: sessionData, error: sessionError } = await supabase
