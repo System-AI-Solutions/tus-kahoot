@@ -286,6 +286,40 @@ export interface Database {
           },
         ]
       }
+      official_questions: {
+        Row: {
+          exam_group_key: string
+          source_file: string
+          question_number: number
+          stem: string
+          option_a: string | null
+          option_b: string | null
+          option_c: string | null
+          option_d: string | null
+          option_e: string | null
+          correct_answer: 'A' | 'B' | 'C' | 'D' | 'E' | null
+          is_cancelled: boolean
+          parse_note: string | null
+          imported_at: string
+        }
+        Insert: {
+          exam_group_key: string
+          source_file: string
+          question_number: number
+          stem: string
+          option_a?: string | null
+          option_b?: string | null
+          option_c?: string | null
+          option_d?: string | null
+          option_e?: string | null
+          correct_answer?: 'A' | 'B' | 'C' | 'D' | 'E' | null
+          is_cancelled?: boolean
+          parse_note?: string | null
+          imported_at?: string
+        }
+        Update: Partial<Database['public']['Tables']['official_questions']['Insert']>
+        Relationships: []
+      }
       bookmarks: {
         Row: {
           id: string
